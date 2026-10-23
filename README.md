@@ -1,14 +1,4 @@
 # GrandStay - Ứng dụng quản lý khách sạn bằng Tkinter, MVC, Python, MySQL
-
-**Bản desktop đúng yêu cầu Nhóm 11.** Khác ZIP gốc là website FastAPI, bản này chạy trong **cửa sổ Tkinter trên Windows**, không mở localhost hay trình duyệt. Có thể chạy Python 3.11–3.13, MySQL Server 8.x.
-
-## Giao diện dựa trên đúng mẫu gốc
-
-- Giữ nhận diện **GrandStay** và bảng màu web cũ: xanh navy `#19334d`, sidebar `#173149`, vàng `#c9a36d`, nền quản trị `#f6f8fb`, thẻ nội dung trắng.
-- Trang chủ mở khi chạy: logo G, thanh menu, banner nghỉ dưỡng, minh họa tòa khách sạn, form tìm phòng, thẻ loại phòng, dịch vụ, tra cứu, tư vấn 24/7.
-- Quản trị: sidebar theo nhóm Tổng quan / Nghiệp vụ / Quản trị, topbar trắng, dashboard thẻ số liệu và bảng đặt phòng tương tự bố cục cũ.
-- Hình minh họa được **vẽ bằng Canvas trong Tkinter**, không phụ thuộc ảnh mạng; đây là bản tái tạo giao diện native theo mẫu, **không phải bản hiển thị HTML/CSS pixel-perfect** (Tkinter không hỗ trợ toàn bộ CSS web).
-
 ## Cấu trúc MVC
 
 ```text
@@ -85,10 +75,6 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
    HOTEL_NAME=GrandStay
    ```
 
-   Nếu tài khoản MySQL có mật khẩu, điền trực tiếp vào `MYSQL_PASSWORD`. Chương trình tự mã hóa các ký tự đặc biệt như `@`, `#`, `/`, `:`, `%`, không còn phải chỉnh `DATABASE_URL`. Nên dùng tài khoản `grandstay_app` được tạo trong `scripts/mysql_create.sql` thay vì `root` cho ứng dụng thực tế. **Không tải `.env` lên GitHub**.
-
-   Phần mềm vẫn hỗ trợ cấu hình `DATABASE_URL` cũ nếu bạn không khai báo biến `MYSQL_*`. Nếu có cả hai, `MYSQL_*` được ưu tiên. Các biến `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMAIL_*` hoặc `GEMINI_*` từ ZIP web cũ hiện **không** tự kích hoạt các tính năng tương ứng trong bản Tkinter.
-
 5. Chạy đúng thứ tự:
 
    ```powershell
@@ -120,15 +106,6 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 
 **Quy định nghiệp vụ:** ngày nhận trước ngày trả; không đặt ngày quá khứ; cấm trùng lịch phòng ở các trạng thái hiệu lực; giá phòng được chốt khi đặt; chỉ thêm dịch vụ trong thời gian đã nhận phòng và trước lúc chốt hóa đơn; không trả phòng nếu hóa đơn còn thiếu tiền.
 
-### Giới hạn cần nói trung thực khi báo cáo
-
-- Đây là sản phẩm desktop học tập; **chưa có email gửi tự động**, hoàn tiền, đặt cọc, đổi lịch đặt, booking nhiều phòng trong một đơn hoặc xử lý giao dịch ngân hàng thật.
-- Chatbot dùng quy tắc, **không phải API AI/LLM**.
-- Xuất PDF phục vụ nội bộ, không phải hóa đơn điện tử thuế.
-- Không có phân hệ bảo trì, dọn phòng, sự cố theo phạm vi Nhóm 11 đã chốt.
-- Phần quản lý khách hàng chỉ dành cho Admin/Lễ tân; khách dùng màn hình tự phục vụ, không tạo tài khoản để đăng nhập.
-- Không tích hợp migration production; `create_all` chỉ tạo bảng còn thiếu, không tự cập nhật cấu trúc bảng đã có.
-
 ## Kiểm thử
 
 Chạy kiểm thử nghiệp vụ với **SQLite trong bộ nhớ chỉ dành cho test**, hoàn toàn không sử dụng hoặc thay đổi MySQL của bạn:
@@ -139,13 +116,3 @@ Chạy kiểm thử nghiệp vụ với **SQLite trong bộ nhớ chỉ dành ch
 ```
 
 Test kiểm tra nghiệp vụ không yêu cầu màn hình; muốn kiểm tra View Tkinter, hãy chạy `main.py` trực tiếp trên máy Windows có desktop.
-
-## Lỗi thường gặp
-
-- `No module named sqlalchemy/pymysql/dotenv`: cài `requirements.txt` đúng Python trong `.venv`.
-- `Access denied for user`: sai user/mật khẩu hoặc `GRANT` MySQL; kiểm tra `MYSQL_USER` và `MYSQL_PASSWORD` trong `.env`.
-- `getaddrinfo failed` / máy chủ `@127.0.0.1`: lỗi cấu hình URL cũ. Hãy xóa `DATABASE_URL` trong `.env` và khai báo riêng `MYSQL_HOST=127.0.0.1`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`.
-- `Can't connect to MySQL server`: kiểm tra MySQL Service (port 3306).
-- `Unknown database`: chưa chạy `scripts/mysql_create.sql`.
-- Tkinter không khởi chạy: trên Linux cần gói Tk và một desktop/display; bản ưu tiên Windows.
-- Đừng giải nén `.venv` từ ZIP web cũ; môi trường ảo Windows cũ không tái dùng được trên máy khác.
