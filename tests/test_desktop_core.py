@@ -1,5 +1,6 @@
 """Pure controller/service tests on throwaway SQLite; NEVER touch live MySQL."""
 import os
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -18,10 +19,14 @@ from hotel.services.security import hash_password
 
 
 @pytest.fixture
-def hotel():
+def hotel(monkeypatch):
+    messages = []
+    monkeypatch.setenv('EMAIL_OTP_SECRET', 'only-test-key')
+    monkeypatch.setattr('hotel.services.mailer.send_email',
+                        lambda recipient, subject, body: messages.append((recipient, subject, body)))
     engine = create_engine('sqlite:///:memory:', connect_args={'check_same_thread': False},
                            poolclass=StaticPool)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
     with factory() as db:
         room_type = RoomType(name='Deluxe', capacity=3, nightly_price=Decimal('600000'))
@@ -35,6 +40,7 @@ def hotel():
                     password_hash=hash_password('StrongStaff123'), role='receptionist'))
         db.commit()
     c = DesktopController(factory)
+    c.test_outbox = messages
     yield c, factory
     engine.dispose()
 
@@ -53,12 +59,16 @@ def test_guest_search_reserve_lookup_and_overlap(hotel):
     assert c.public_services()[0]['name'] == 'Giặt là'
     assert len(c.available(value['checkin'], value['checkout'], 2, room_type_id=1)) == 1
     assert len(c.available(value['checkin'], value['checkout'], 2)) == 1
+    c.request_guest_booking_otp(value['email'])
+    value['guest_otp'] = re.search(r'Mã OTP GrandStay của bạn: (\d{6})',
+                                    c.test_outbox[-1][2]).group(1)
     code = c.book(value)
     assert code.startswith('BK-')
     assert c.lookup(code, value['phone'])['status'] == 'pending'
     with pytest.raises(ValueError):
         c.lookup(code, '00000000')
     assert c.available(value['checkin'], value['checkout'], 2) == []
+    c.login('admin', 'StrongAdmin123')
     with pytest.raises(ValueError, match='trùng'):
         c.book(value)
     with factory() as db:
@@ -107,7 +117,8 @@ def test_permissions_and_admin_catalog(hotel):
     c.toggle_room(2)
     assert c.table('rooms')[1]['active'] is False
     c.add_user({'username': 'staff2', 'name': 'Nguyễn Văn B',
-                'password': 'StrongPass123', 'role': 'receptionist'})
+                'email': 'staff2@example.com', 'phone': '0912345684',
+                'position': 'Lễ tân', 'role': 'receptionist'})
     assert len(c.table('users')) == 3
 
 
@@ -121,3 +132,46 @@ def test_validate_dates_price_and_chatbot(hotel):
     c.login('admin', 'StrongAdmin123')
     with pytest.raises(ValueError):
         c.save_service({'name': 'Spa', 'price': '-2000', 'active': True})
+
+
+def test_walkin_guest_history_link_requires_admin_approval(hotel):
+    c, factory = hotel
+    c.login('reception', 'StrongStaff123')
+    code = c.book(request())
+    c.logout()
+    # The new customer account knows the same phone, but has no history yet.
+    c.request_registration_otp('walkin@example.com')
+    registration_otp = re.search(r'Mã OTP GrandStay của bạn: (\d{6})',
+                                 c.test_outbox[-1][2]).group(1)
+    c.register_customer('walkin', 'Nguyễn Văn A', 'walkin@example.com',
+                        'CustomerPass123', 'CustomerPass123', registration_otp,
+                        '0912345678')
+    c.login('walkin@example.com', 'CustomerPass123')
+    assert c.customer_history() == []
+    with pytest.raises(ValueError):
+        c.request_customer_link('BK-NOTFOUND', '0912345678')
+    c.request_customer_link(code, '0912345678')
+    with pytest.raises(ValueError, match='chờ'):
+        c.request_customer_link(code, '0912345678')
+    assert c.customer_history() == []
+    c.login('reception', 'StrongStaff123')
+    with pytest.raises(PermissionError):
+        c.link_requests()
+    c.login('admin', 'StrongAdmin123')
+    pending = c.link_requests()
+    assert len(pending) == 1
+    c.decide_customer_link(pending[0]['id'], True)
+    c.login('walkin@example.com', 'CustomerPass123')
+    assert [row['code'] for row in c.customer_history()] == [code]
+
+
+def test_anonymous_online_booking_requires_real_email_otp(hotel):
+    c, _factory = hotel
+    request_data = request(phone='0988888999')
+    with pytest.raises(ValueError, match='OTP'):
+        c.book(request_data)
+    c.request_guest_booking_otp(request_data['email'])
+    request_data['guest_otp'] = re.search(r'Mã OTP GrandStay của bạn: (\d{6})',
+                                          c.test_outbox[-1][2]).group(1)
+    code = c.book(request_data)
+    assert c.lookup(code, request_data['phone'])['status'] == 'pending'

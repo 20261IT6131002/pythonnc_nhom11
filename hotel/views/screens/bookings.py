@@ -1,7 +1,7 @@
 from __future__ import annotations
 import tkinter as tk
 from datetime import date, timedelta
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 from hotel.views.components.theme import (BACKGROUND, DEEP, EDGE, FONT, GOLD, GOLD_LIGHT, INK, MUTED, NAVY, SIDEBAR, SIDEBAR_HOVER, WHITE, brand, hotel_art, solid_button, text)
 from hotel.views.components.widget_helpers import (add_tree, choice_id, error, form_dialog, success)
 
@@ -18,6 +18,22 @@ class BookingsScreenMixin:
              ('guests', 'Số khách', '2'), ('notes', 'Ghi chú', '')])
         if values is not None:
             values['room_id'] = choice_id(values['room_id'])
+            matches = self.c.find_customers_by_phone(values['phone'])
+            if matches:
+                choices = ['Tạo hồ sơ mới (khách vãng lai)'] + [
+                    f"{row['id']} - {row['name']} ({row['phone']})" for row in matches]
+                chosen = form_dialog(self, 'Đã tìm thấy hồ sơ theo số điện thoại', [
+                    ('profile', 'Hãy đối chiếu danh tính rồi chọn hồ sơ', choices[0], choices),
+                ])
+                if chosen is None:
+                    return
+                if chosen['profile'] != choices[0]:
+                    if not messagebox.askyesno('Xác minh khách tại quầy',
+                            'Bạn đã đối chiếu danh tính người đặt phòng với hồ sơ cũ?\n'
+                            'Chỉ chọn Có khi chắc chắn đúng người.',
+                            parent=self.winfo_toplevel()):
+                        return
+                    values['customer_id'] = choice_id(chosen['profile'])
             code = self.c.book(values)
             self._done(f'Đặt phòng thành công: {code}\nTrạng thái: confirmed.\n'
                        'Hệ thống đã kiểm tra phòng trống trong toàn bộ khoảng ngày.')

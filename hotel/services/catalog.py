@@ -78,6 +78,8 @@ def toggle_room(db, actor_id, room):
 def save_customer(db, actor_id, customer, name, phone, email='', document_no=''):
     name = checked_name(name)
     phone = checked_name(phone, 8, 20)
+    if customer is not None and customer.user_id is not None and customer.phone != phone:
+        raise ValueError('Hồ sơ đã liên kết tài khoản. Không đổi SĐT tại đây để tránh lệch danh tính.')
     if customer is None:
         customer = Customer()
         db.add(customer)
@@ -109,6 +111,8 @@ def add_user(db, actor_id, username, name, password, role):
 
 
 def toggle_user(db, actor_id, user):
+    if user.archived_at is not None:
+        raise ValueError('Tài khoản đã ngừng sử dụng, không thể mở khóa.')
     if user.id == actor_id:
         raise ValueError('Không thể khóa tài khoản đang sử dụng.')
     if user.active and user.role == 'admin':

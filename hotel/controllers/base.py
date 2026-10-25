@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 from hotel.models.database import SessionLocal
 from hotel.models.entities import User
+from hotel.services.auth import credential_tag
+import hmac
 
 
 class BaseController:
@@ -19,15 +21,26 @@ class BaseController:
                 raise
 
     def _require_staff(self, db, admin=False):
-        if not self.user:
+        u = self._require_user(db)
+        if u.must_change_password:
+            raise PermissionError('Bạn phải đổi mật khẩu tạm trước khi dùng nghiệp vụ.')
+        if u.role not in ('admin', 'receptionist'):
             raise PermissionError('Chỉ nhân viên được thực hiện thao tác này.')
-        u = db.get(User, self.user['id'])
-        if not u or not u.active or u.role not in ('admin', 'receptionist'):
-            self.user = None
-            raise PermissionError('Tài khoản không còn quyền truy cập.')
         if admin and u.role != 'admin':
             raise PermissionError('Chức năng chỉ dành cho Admin.')
         return u.id
+
+    def _require_user(self, db):
+        if not self.user:
+            raise PermissionError('Vui lòng đăng nhập để tiếp tục.')
+        u = db.get(User, self.user['id'])
+        if (not u or not u.active or u.archived_at is not None or
+                u.role != self.user['role'] or
+                not hmac.compare_digest(self.user.get('_credential_tag', ''),
+                                        credential_tag(u.password_hash))):
+            self.user = None
+            raise PermissionError('Tài khoản không còn quyền truy cập.')
+        return u
 
     @staticmethod
     def _must(db, model, row_id):

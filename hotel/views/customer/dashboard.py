@@ -61,8 +61,16 @@ class GuestView(CustomerHomeMixin, CustomerRoomsMixin, CustomerLookupMixin, Cust
         header.pack(fill='x')
         header.pack_propagate(False)
         brand(header, tagline='HOTEL & RESORT').pack(side='left', padx=(45, 0), pady=20)
-        solid_button(header, 'Nhân viên đăng nhập', self.app.show_login,
-                     light=True).pack(side='right', padx=(8, 45), pady=16)
+        user = self.c.user
+        if user and user['role'] == 'customer':
+            solid_button(header, 'Đăng xuất', self.app.show_guest,
+                         light=True).pack(side='right', padx=(8, 45), pady=16)
+            tk.Button(header, text=f"Tài khoản: {user['name']}", command=self.show_account,
+                      bg=WHITE, fg=NAVY, bd=0, cursor='hand2',
+                      font=(FONT, 10, 'bold')).pack(side='right', padx=8)
+        else:
+            solid_button(header, 'Đăng nhập / Đăng ký', self.app.show_login,
+                         light=True).pack(side='right', padx=(8, 45), pady=16)
         for label, func in reversed([
             ('Trang chủ', self.show_home), ('Phòng nghỉ', self.show_rooms),
             ('Tiện ích', self.show_services), ('Tra cứu đặt phòng', self.show_lookup),
@@ -80,6 +88,85 @@ class GuestView(CustomerHomeMixin, CustomerRoomsMixin, CustomerLookupMixin, Cust
         section = tk.Frame(self.content, bg=bg, padx=padding, pady=28)
         section.pack(fill='x')
         return section
+
+    def show_account(self):
+        self._clear()
+        try:
+            user = self.c.get_current_user()
+            if user['role'] != 'customer':
+                raise PermissionError('Vui lòng đăng nhập bằng tài khoản khách hàng.')
+        except Exception as exc:
+            error(self, exc)
+            self.app.show_login()
+            return
+        section = self._section()
+        text(section, 'TÀI KHOẢN KHÁCH HÀNG', 10, GOLD, WHITE, 'bold').pack(anchor='w')
+        text(section, f"Xin chào, {user['name']}", 24, NAVY, WHITE, 'bold').pack(anchor='w', pady=(10, 15))
+        text(section, 'Bạn đã đăng nhập thành công. Tại đây bạn có thể quản lý '
+             'mật khẩu và tiếp tục xem phòng hoặc dịch vụ GrandStay.',
+             11, MUTED, WHITE, wraplength=650).pack(anchor='w', pady=(0, 20))
+        status = (f"Email đã xác minh: {user['email']}" if user.get('email_verified')
+                  else 'Chưa liên kết email bảo mật.')
+        text(section, status, 10, NAVY, WHITE, 'bold').pack(anchor='w', pady=(0, 15))
+        if user.get('phone'):
+            text(section, f"SĐT liên hệ: {user['phone']} (chưa xác minh bằng SMS)",
+                 10, NAVY, WHITE).pack(anchor='w', pady=(0, 12))
+        else:
+            text(section, 'Tài khoản cũ chưa có SĐT. Vui lòng bổ sung trước khi đặt phòng.',
+                 10, MUTED, WHITE).pack(anchor='w', pady=(0, 8))
+        solid_button(section, 'Cập nhật số điện thoại', self.update_phone, light=True).pack(
+            anchor='w', pady=(0, 12))
+        text(section, 'ĐẶT PHÒNG CỦA TÔI', 13, NAVY, WHITE, 'bold').pack(
+            anchor='w', pady=(10, 8))
+        try:
+            bookings = self.c.customer_history()
+            for row in bookings[:20]:
+                text(section, f"{row['code']} · Phòng {row['room']} · "
+                     f"{row['checkin']} → {row['checkout']} · {row['status']}",
+                     10, INK, WHITE).pack(anchor='w', pady=4)
+            if not bookings:
+                text(section, 'Chưa có đặt phòng được liên kết với tài khoản.',
+                     10, MUTED, WHITE).pack(anchor='w')
+        except Exception as exc:
+            error(self, exc)
+        solid_button(section, 'Liên kết lịch sử đặt phòng tại quầy',
+                     self.request_old_history, light=True).pack(anchor='w', pady=(12, 20))
+        text(section, 'BẢO MẬT TÀI KHOẢN', 13, NAVY, WHITE, 'bold').pack(
+            anchor='w', pady=(10, 8))
+        text(section, 'Để bảo vệ tài khoản, bạn có thể đổi mật khẩu hiện tại '
+             'bất cứ lúc nào. Nếu quên, dùng OTP trong trang đăng nhập.',
+             10, MUTED, WHITE, wraplength=650).pack(anchor='w', pady=(0, 12))
+        solid_button(section, 'Đổi mật khẩu', self.app.change_password).pack(
+            anchor='w', pady=(0, 16))
+        solid_button(section, 'Tìm phòng →', self.show_rooms, light=True).pack(anchor='w')
+
+    def request_old_history(self):
+        values = form_dialog(self, 'Đề nghị liên kết lịch sử tại quầy', [
+            ('code', 'Mã đặt phòng cũ (BK-...)', ''),
+            ('phone', 'SĐT đã dùng tại quầy', ''),
+        ])
+        if values is None:
+            return
+        try:
+            self.c.request_customer_link(values['code'], values['phone'])
+            success(self, 'Đã gửi yêu cầu. Admin cần xác minh danh tính trực tiếp '\
+                          'trước khi duyệt. Không tự liên kết chỉ bằng SĐT và mã đơn.')
+        except Exception as exc:
+            error(self, exc)
+
+    def update_phone(self):
+        values = form_dialog(self, 'Cập nhật SĐT tài khoản khách', [
+            ('phone', 'SĐT mới (10 số hoặc +84)', ''),
+            ('password', 'Mật khẩu hiện tại', '', None, True),
+        ])
+        if values is None:
+            return
+        try:
+            self.c.set_customer_phone(values['password'], values['phone'])
+            success(self, 'Đã lưu SĐT liên hệ. Số này chưa xác minh bằng SMS.')
+            self.show_account()
+        except Exception as exc:
+            error(self, exc)
 
 
 

@@ -7,6 +7,7 @@ from hotel.repositories.catalog import HotelRepository
 from hotel.services import business, catalog, chatbot, pdf_service
 from hotel.services.security import verify_password
 from hotel.controllers.utils import vnd
+from hotel.models.n1_core import Employee
 
 
 class CatalogControllerMixin:
@@ -51,10 +52,13 @@ class CatalogControllerMixin:
                          'price': str(x.room_type.nightly_price)} for x in repo.rooms()]
             if kind == 'customers':
                 return [{'id': x.id, 'name': x.full_name, 'phone': x.phone,
-                         'email': x.email, 'document_no': x.document_no} for x in repo.customers()]
+                         'email': x.email, 'document_no': x.document_no,
+                         'linked': 'Đã liên kết' if x.user_id else 'Khách tại quầy'}
+                        for x in repo.customers()]
             if kind == 'bookings':
                 return [{'id': x.id, 'code': x.code, 'customer': x.customer.full_name,
-                         'phone': x.customer.phone, 'room': x.room.number,
+                         'phone': x.customer.phone, 'customer_id': x.customer_id,
+                         'room': x.room.number,
                          'checkin': str(x.checkin_date), 'checkout': str(x.checkout_date),
                          'guests': x.guests, 'status': x.status,
                          'estimate': vnd(x.nightly_price * (x.checkout_date - x.checkin_date).days)}
@@ -68,8 +72,18 @@ class CatalogControllerMixin:
                          'total': vnd(x.total_amount), 'paid': vnd(x.total_amount - business.invoice_due(x)),
                          'due': vnd(business.invoice_due(x))} for x in repo.invoices()]
             if kind == 'users':
+                users = repo.users()
+                employees = {x.user_id: x for x in db.scalars(select(Employee)).all()}
                 return [{'id': x.id, 'username': x.username, 'name': x.full_name,
-                         'role': x.role, 'active': x.active} for x in repo.users()]
+                         'role': x.role, 'active': x.active,
+                         'account_status': ('Ngừng sử dụng' if x.archived_at else
+                                            'Đã khóa' if not x.active else
+                                            'Chờ đổi mật khẩu' if x.must_change_password else
+                                            'Hoạt động'),
+                         'email': x.email or '',
+                         'phone': x.phone or (employees[x.id].phone if x.id in employees else ''),
+                         'position': employees[x.id].position if x.id in employees else ''}
+                        for x in users]
             if kind == 'logs':
                 return [{'id': x.id, 'date': str(x.created_at), 'actor': x.actor_id or '-',
                          'action': x.action, 'details': x.details} for x in repo.logs()]

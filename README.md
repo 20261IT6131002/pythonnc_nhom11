@@ -85,13 +85,15 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 
    `seed` không chạy chồng khi có loại phòng; `create_admin` hỏi tên/mật khẩu bạn tự đặt, **không có mật khẩu mặc định**. Chỉ cần tạo admin một lần. Những lần mở sau, chạy `main.py` hoặc `CHAY_WINDOWS.bat`.
 
-6. Ứng dụng mở **trang chủ GrandStay** theo mẫu gốc. Chọn **Nhân viên đăng nhập** ở góc trên bên phải, dùng tài khoản Admin vừa tạo để vào màn hình quản trị. Khách có thể tìm/đặt phòng ngay ở trang chủ mà không cần tài khoản.
+6. Ứng dụng mở **trang chủ GrandStay**. Chọn **Đăng nhập / Đăng ký** ở góc trên bên phải, dùng tài khoản Admin vừa tạo để vào màn hình quản trị. Khách vẫn có thể xem và tìm phòng công khai.
 
 ## Các chức năng đã lập trình
 
 | Nhóm | Chức năng |
 |---|---|
-| Đăng nhập & quyền | Admin, Lễ tân; tạo/khóa tài khoản (Admin), nhật ký hành động |
+| Đăng nhập & quyền | Admin, Lễ tân, Khách hàng; khách đăng ký qua email + OTP; đăng nhập bằng email đã xác minh hoặc username cũ; khôi phục mật khẩu qua OTP; Admin tạo/khóa nhân viên |
+| Cấu hình và nhân viên N1 | Đủ sáu bảng N1 `users`, `roles`, `user_roles`, `employees`, `audit_logs`, `system_settings`; Admin quản lý hồ sơ nhân viên và thông tin khách sạn |
+| Bảo vệ mật khẩu | PBKDF2-HMAC-SHA256 với salt riêng và 600.000 vòng; hash 310.000 vòng cũ được nâng cấp khi đăng nhập thành công; đổi mật khẩu sau đăng nhập |
 | Tổng quan | Số phòng, khách, đơn đặt, khách đang lưu trú, tiền thu trong ngày |
 | Phòng và loại phòng | Thêm/sửa loại phòng, giá, sức chứa; thêm/sửa/tạm ngừng phòng |
 | Khách hàng | Thêm/sửa thông tin, xem lịch sử đặt phòng theo SĐT |
@@ -116,3 +118,86 @@ Chạy kiểm thử nghiệp vụ với **SQLite trong bộ nhớ chỉ dành ch
 ```
 
 Test kiểm tra nghiệp vụ không yêu cầu màn hình; muốn kiểm tra View Tkinter, hãy chạy `main.py` trực tiếp trên máy Windows có desktop.
+
+## N1 — Tài khoản và mật khẩu
+
+- Ở trang chủ chọn **Đăng nhập / Đăng ký**. Khách điền Gmail **và SĐT bắt buộc**, nhận mã OTP vào Gmail, nhập đủ sáu số và mới được tạo tài khoản. SĐT là thông tin tra cứu, **chưa được xác minh bằng SMS**.
+- Admin và Lễ tân cũng đăng nhập tại form này, rồi được chuyển vào Dashboard nhân viên phù hợp với quyền hiện có.
+- Admin đầu tiên tạo bằng `scripts.create_admin` cũng phải khai báo email và nhập OTP được gửi qua SMTP; chỉ lưu vào MySQL sau khi xác minh email.
+- Admin/Lễ tân cũ vẫn đăng nhập bằng username. Tài khoản nhân viên **tạo mới bắt buộc khai báo email** ngay khi cấp. Các tài khoản cũ chưa có email có thể được Admin khác bổ sung qua **Tài khoản → Nhân viên → nhấp đúp vào dòng → Gán / sửa Gmail**; không còn nút xác minh email trên header.
+- Ở mục **Quên mật khẩu**, nhập email đã xác minh, gửi mã và đặt mật khẩu mới. Mã hết hạn sau 10 phút, dùng một lần, tối đa 5 lần nhập sai và giới hạn gửi lại trong 60 giây.
+- Nhân viên chọn **Tài khoản của tôi → Đổi mật khẩu**; khách chọn **Tài khoản → Bảo mật tài khoản → Đổi mật khẩu**. Mật khẩu không bao giờ lưu dưới dạng văn bản thuần.
+- Admin vào **Tài khoản → Nhân viên**: chỉ có một nút **+ Thêm tài khoản nhân viên** ở phía trên, nhập username, họ tên, SĐT, Gmail, chức vụ, vai trò; hệ thống sinh mật khẩu tạm ngẫu nhiên và **gửi Gmail**, hiệu lực 24 giờ. Nhân viên bắt buộc đổi mật khẩu trước khi dùng nghiệp vụ. Mỗi dòng nhân viên có **Khóa/Mở** và **Xóa vĩnh viễn** bên phải. Xóa bắt nhập chính xác username, loại bỏ `users`, `employees`, `user_roles`; bản ghi đã xóa không còn hiển thị hay đăng nhập. Không xóa tài khoản đang dùng, Admin hoạt động cuối cùng hoặc nhân viên đã lập thanh toán (cần giữ khóa ngoại người lập phiếu). Nhấp đúp dòng để cấp lại mật khẩu tạm, gán Gmail hoặc sửa hồ sơ.
+- **Tài khoản → Khách hàng** chỉ là tài khoản khách đã đăng ký online; **Hồ sơ khách lưu trú** gồm cả khách đặt tại quầy không có tài khoản/mật khẩu.
+- Đơn đặt tại quầy không bắt buộc Gmail; lễ tân tìm SĐT và đối chiếu danh tính trước khi chọn hồ sơ cũ. Khách đăng ký sau gửi **yêu cầu liên kết lịch sử** bằng mã đặt phòng + SĐT; Admin phải đối chiếu danh tính rồi duyệt. Không tự gộp lịch sử chỉ bằng SĐT.
+- Khách đặt online khi chưa đăng nhập xác minh **OTP qua Gmail cho đơn đặt phòng**; khách đã đăng nhập được gắn đơn vào hồ sơ tài khoản của mình.
+- Admin chọn **Sửa hồ sơ nhân viên** để cập nhật số điện thoại và chức vụ; chọn **Cấu hình khách sạn** để cập nhật tên, địa chỉ, điện thoại và giờ nhận/trả phòng.
+- Khi không còn Admin có thể đăng nhập, quản trị viên máy chủ có quyền truy cập MySQL và `.env` được phép khôi phục bằng lệnh dưới đây. Lệnh yêu cầu xác nhận thủ công, không in mật khẩu ra màn hình:
+
+  ```powershell
+  .\.venv\Scripts\python.exe -m scripts.reset_password
+  ```
+
+**Bảo mật:** Đây là *hash một chiều*, không phải mã hóa hai chiều có thể giải mã. Mỗi tài khoản dùng salt ngẫu nhiên; hàm so khớp dùng `hmac.compare_digest`. Tài khoản dùng hash PBKDF2 310.000 vòng từ phiên bản cũ vẫn đăng nhập được và được nâng lên 600.000 vòng một cách tự động.
+
+### Cấu hình SMTP gửi OTP trên Windows
+
+Mở `.env` hiện có của dự án, **không ghi đè file này** khi cập nhật bản N1. Thêm các biến:
+
+```dotenv
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_SECURITY=starttls
+EMAIL_SMTP_USER=diachi-cua-ban@gmail.com
+EMAIL_SMTP_PASSWORD=mat_khau_ung_dung_16_ky_tu
+EMAIL_FROM=diachi-cua-ban@gmail.com
+EMAIL_OTP_SECRET=mot_chuoi_bi_mat_ngau_nhien_dai
+```
+
+Với Gmail, cần bật xác minh hai bước và dùng **App Password**, không nhập mật khẩu Gmail chính. Một số tài khoản tổ chức hoặc cấu hình bảo vệ đặc biệt không cho tạo App Password; có thể dùng SMTP nhà cung cấp khác có SSL/TLS.
+
+Tạo khóa bí mật OTP bằng lệnh:
+
+```powershell
+py -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Dán kết quả vào `EMAIL_OTP_SECRET`, giữ kín và không đẩy `.env` lên GitHub. Nếu bỏ trống, ứng dụng tạo khóa theo phiên nên OTP đang chờ sẽ không hợp lệ sau khi khởi động lại.
+
+Kiểm tra dịch vụ gửi email trước khi dùng:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_smtp
+```
+
+Ứng dụng không có chế độ OTP giả khi thiếu SMTP. Đăng ký/khôi phục qua email cần kết nối Internet và cấu hình SMTP thành công.
+
+### Kiểm tra MySQL đang dùng và xác nhận tài khoản thật sự được lưu
+
+GrandStay truy vấn trực tiếp MySQL bằng SQLAlchemy và commit mỗi thao tác thành công.
+Nếu MySQL Workbench không thấy tài khoản, **đối chiếu tên database** (ví dụ
+`grandstay_nhom11` khác `smart_hotel`) bằng lệnh chỉ đọc:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.verify_mysql_accounts
+.\.venv\Scripts\python.exe -m scripts.verify_mysql_accounts --username letan
+```
+
+Sau đó chọn cùng schema trong MySQL Workbench và chạy:
+
+```sql
+SELECT DATABASE();
+SELECT id, username, role, active, archived_at FROM users ORDER BY id DESC;
+SELECT id, user_id, phone, position FROM employees ORDER BY id DESC;
+```
+
+Nếu **Thêm nhân viên** hoặc **Đăng ký khách** gặp lỗi trước thông báo thành công,
+transaction bị rollback nên tài khoản không xuất hiện trong MySQL. Cấu hình SMTP
+cũng phải hợp lệ vì hệ thống không cấp mật khẩu tạm/OTP giả. Đóng rồi mở lại
+Workbench hoặc Refresh schema sau khi tạo/xóa tài khoản.
+
+**Tương thích dữ liệu:** Bản N1 thêm các bảng `roles`, `user_roles`, `employees`, `system_settings`, `email_otps`; tự bổ sung hai cột nullable `users.email`, `users.email_verified_at` và chỉ mục email vào MySQL hiện có. Khi khởi động, mã migration kiểm tra cấu trúc trước khi thêm để bảo toàn tài khoản cũ. `users.role` vẫn được giữ cho các phân hệ cũ.
+
+**Giới hạn tích hợp:** Phần xác thực Customer lưu trong `users`; bảng `customers` và lịch sử đặt phòng thuộc phân hệ N3/N2. Bản N1 bổ sung liên kết qua `customers.user_id` và quy trình Admin duyệt nhưng chưa có xác thực SMS; việc đồng bộ dữ liệu N2/N3 ở các nhánh khác cần kiểm tra khi merge. Không tự động nhập hai tài khoản có cùng tên hoặc số điện thoại thành một người khi chưa xác minh danh tính. Email, họ tên và dữ liệu nghiệp vụ vẫn lưu dưới dạng thông thường trong MySQL; hash mật khẩu và OTP **không đồng nghĩa mã hóa toàn bộ database**.
+
+**N1 cập nhật ngày 25/10/2026:** Bản ghi đè mới đã bổ sung `customers.user_id`, bảng `customer_link_requests`, giao diện chờ Admin xác minh lịch sử, tách quản lý tài khoản/hồ sơ khách, và luồng cấp nhân viên Gmail mật khẩu tạm theo cách B. Đọc **`N1_HUONG_DAN_LUONG_B_20261025.md`** trước khi giải nén; bản này thay thế các hướng dẫn N1 cũ về cấp mật khẩu thủ công. Vẫn cần chạy thử migration trên MySQL thật và thử giao diện trên Windows trước khi push.

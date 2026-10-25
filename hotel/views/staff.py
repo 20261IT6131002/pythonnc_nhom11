@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from hotel.views.receptionist.dashboard import StaffDashboardMixin
 from hotel.views.admin.dashboard import AdminReportsMixin
+from hotel.views.admin.settings import AdminSettingsMixin
 from hotel.views.screens.rooms import RoomsScreenMixin
 from hotel.views.screens.customers import CustomersScreenMixin
 from hotel.views.screens.services import ServicesScreenMixin
@@ -21,15 +22,17 @@ from hotel.views.components.sidebar import build_sidebar
 from hotel.views.pages import PAGE_DESCRIPTIONS, TABLE_COLUMNS, TAB_NAMES
 
 
-class StaffView(StaffDashboardMixin, AdminReportsMixin, RoomsScreenMixin,
+class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, RoomsScreenMixin,
                 CustomersScreenMixin, ServicesScreenMixin, BookingsScreenMixin,
                 BillingScreenMixin, AdminScreenMixin, StaffChatScreenMixin, tk.Frame):
     def __init__(self, parent, controller, app):
         super().__init__(parent, bg=BACKGROUND)
         self.c, self.app = controller, app
         self.admin = controller.user['role'] == 'admin'
+        self.account_kind = 'staff'
         self.current_tab = 'dashboard'
-        self.tabs = [name for name in TAB_NAMES if self.admin or name not in ('reports', 'users', 'logs')]
+        self.tabs = [name for name in TAB_NAMES if self.admin or name not in
+                     ('reports', 'users', 'links', 'logs', 'settings')]
         self.nav_buttons = build_sidebar(self, app, self.tabs)
 
         main = tk.Frame(self, bg=BACKGROUND)
@@ -43,6 +46,9 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, RoomsScreenMixin,
         tk.Button(header, text='Đăng xuất', command=app.show_login,
                   bg=WHITE, fg='#c45c60', bd=0, cursor='hand2',
                   font=(FONT, 10, 'bold')).pack(side='right', padx=(0, 32))
+        tk.Button(header, text='Tài khoản của tôi', command=app.account_menu,
+                  bg=WHITE, fg=NAVY, bd=0, cursor='hand2',
+                  font=(FONT, 10, 'bold')).pack(side='right', padx=(0, 16))
         user = controller.user
         text(header, f"{user['name']}  ({user['role']})", 10, INK, WHITE,
              'bold').pack(side='right', padx=16)
@@ -78,6 +84,18 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, RoomsScreenMixin,
                 self._calendar()
             elif tab == 'reports':
                 self._reports()
+            elif tab == 'settings':
+                if not self.admin:
+                    raise PermissionError('Chức năng chỉ dành cho Admin.')
+                self._settings()
+            elif tab == 'users':
+                if not self.admin:
+                    raise PermissionError('Chỉ Admin được quản lý tài khoản.')
+                self._accounts_tab()
+            elif tab == 'links':
+                if not self.admin:
+                    raise PermissionError('Chỉ Admin được duyệt liên kết.')
+                self._links_tab()
             elif tab == 'chat':
                 self._chat()
             else:
@@ -136,9 +154,6 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, RoomsScreenMixin,
         elif tab == 'invoices':
             self._button(bar, 'Ghi nhận thanh toán', self._payment, True)
             self._button(bar, 'Xuất hóa đơn PDF', self._invoice_pdf)
-        elif tab == 'users' and self.admin:
-            self._button(bar, 'Thêm nhân viên', self._add_user, True)
-            self._button(bar, 'Khóa / mở', lambda: self._toggle('user'))
         self.tree = add_tree(panel, TABLE_COLUMNS[tab], self.rows)
 
 

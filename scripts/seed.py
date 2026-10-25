@@ -2,10 +2,15 @@
 from sqlalchemy import select
 from hotel.models.database import engine, SessionLocal, Base
 from hotel.models.entities import Room,RoomType,HotelService
+from hotel.services.n1_core import bootstrap_n1
+from hotel.services.email_schema import migrate_email_columns
 from decimal import Decimal
 
 def run():
+    migrate_email_columns(engine)
     Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        bootstrap_n1(db)
     with SessionLocal() as db:
         if db.scalar(select(RoomType.id).limit(1)):
             print('Đã có dữ liệu loại phòng; không nạp lặp.');return

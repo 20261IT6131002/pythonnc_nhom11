@@ -20,7 +20,7 @@ class CustomersScreenMixin:
 
     def _customer_history(self):
         selected = self._chosen()
-        rows = [r for r in self.c.table('bookings') if r['phone'] == selected['phone']]
+        rows = [r for r in self.c.table('bookings') if r['customer_id'] == selected['id']]
         text = '\n'.join(f"{x['code']} | Phòng {x['room']} | {x['checkin']} - {x['checkout']} | {x['status']}"
                          for x in rows[:25]) or 'Khách chưa có đơn đặt phòng.'
         success(self, f"Lịch sử khách: {selected['name']}\n\n{text}")

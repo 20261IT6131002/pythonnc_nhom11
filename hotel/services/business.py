@@ -39,7 +39,7 @@ def find_rooms(db: Session, checkin=None, checkout=None, room_type_id=None, gues
 def log_event(db, actor_id, action, details=''):
     db.add(AuditLog(actor_id=actor_id, action=action, details=str(details)[:300]))
 
-def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkout, guests, notes='', status='pending', actor_id=None):
+def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkout, guests, notes='', status='pending', actor_id=None, customer_id=None):
     dates_in_order(checkin, checkout)
     name, phone = str(name).strip(), str(phone).strip()
     if len(name) < 2 or not 8 <= len(phone) <= 20:
@@ -57,7 +57,11 @@ def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkou
         raise ValueError('Số khách vượt quá sức chứa của phòng.')
     if db.scalar(conflicting_query(room.id, checkin, checkout)) is not None:
         raise ValueError('Phòng đã có đơn đặt trùng khoảng thời gian này.')
-    customer = db.scalar(select(Customer).where(Customer.full_name == name, Customer.phone == phone).order_by(Customer.id).limit(1))
+    # Do not attach an anonymous booking to an existing profile just because
+    # someone knows the other person's name and phone number.
+    customer = db.get(Customer, int(customer_id)) if customer_id else None
+    if customer_id and customer is None:
+        raise ValueError('Hồ sơ khách được chọn không tồn tại.')
     if customer is None:
         customer = Customer(full_name=name, phone=phone, email=email.strip())
         db.add(customer)

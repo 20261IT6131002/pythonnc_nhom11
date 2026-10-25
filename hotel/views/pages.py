@@ -2,10 +2,11 @@
 
 TAB_NAMES = {
     'dashboard': 'Tổng quan', 'types': 'Loại phòng & giá', 'rooms': 'Phòng',
-    'customers': 'Khách hàng', 'bookings': 'Đặt / nhận / trả phòng',
+    'customers': 'Hồ sơ khách lưu trú', 'bookings': 'Đặt / nhận / trả phòng',
     'calendar': 'Lịch phòng', 'services': 'Dịch vụ', 'invoices': 'Hóa đơn',
     'reports': 'Thống kê doanh thu', 'chat': 'Tư vấn tự động',
-    'users': 'Nhân viên', 'logs': 'Nhật ký',
+    'users': 'Quản lý tài khoản', 'links': 'Duyệt liên kết lịch sử',
+    'logs': 'Nhật ký', 'settings': 'Cấu hình khách sạn',
 }
 
 TABLE_COLUMNS = {
@@ -14,7 +15,8 @@ TABLE_COLUMNS = {
     'rooms': [('id', 'ID', 50), ('number', 'Số phòng', 100), ('type', 'Loại', 180),
               ('floor', 'Tầng', 65), ('price', 'Giá / đêm (VND)', 150), ('active', 'Hoạt động', 110)],
     'customers': [('id', 'ID', 50), ('name', 'Khách hàng', 200), ('phone', 'SĐT', 140),
-                  ('email', 'Email', 200), ('document_no', 'CCCD / Hộ chiếu', 180)],
+                  ('email', 'Email', 200), ('linked', 'Tài khoản online', 130),
+                  ('document_no', 'CCCD / Hộ chiếu', 180)],
     'bookings': [('id', 'ID', 50), ('code', 'Mã đặt', 160), ('customer', 'Khách hàng', 170),
                  ('phone', 'SĐT', 120), ('room', 'Phòng', 75), ('checkin', 'Ngày nhận', 115),
                  ('checkout', 'Ngày trả', 115), ('status', 'Trạng thái', 115),
@@ -25,7 +27,12 @@ TABLE_COLUMNS = {
                  ('room', 'Phòng', 150), ('services', 'Dịch vụ', 150),
                  ('total', 'Tổng cộng', 150), ('paid', 'Đã thu', 150), ('due', 'Còn thiếu', 150)],
     'users': [('id', 'ID', 50), ('username', 'Tài khoản', 155),
-              ('name', 'Họ tên', 210), ('role', 'Vai trò', 140), ('active', 'Hoạt động', 120)],
+              ('name', 'Họ tên', 210), ('email', 'Email', 210),
+              ('role', 'Vai trò', 140), ('account_status', 'Trạng thái', 165),
+              ('phone', 'SĐT', 120), ('position', 'Chức vụ', 170)],
+    'links': [('id', 'ID', 60), ('username', 'Tài khoản', 160),
+              ('customer', 'Hồ sơ lưu trú', 180), ('code', 'Mã đặt phòng', 160),
+              ('status', 'Trạng thái', 110)],
     'logs': [('id', 'ID', 60), ('date', 'Thời gian', 210), ('actor', 'Người thao tác', 130),
              ('action', 'Hành động', 190), ('details', 'Chi tiết', 300)],
 }
@@ -41,6 +48,8 @@ PAGE_DESCRIPTIONS = {
     'invoices': 'Theo dõi hóa đơn, thanh toán và xuất chứng từ PDF.',
     'reports': 'Xem doanh thu đã ghi nhận theo khoảng ngày.',
     'chat': 'Tư vấn tự động dựa trên dữ liệu khách sạn.',
-    'users': 'Tạo và quản lý tài khoản nhân viên.',
+    'users': 'Tài khoản đăng nhập khác với hồ sơ khách đặt trực tiếp tại quầy.',
+    'links': 'Admin đối chiếu giấy tờ và lịch sử trước khi duyệt liên kết; không tự gộp theo SĐT.',
     'logs': 'Theo dõi hoạt động nghiệp vụ trong hệ thống.',
+    'settings': 'Cập nhật thông tin liên hệ và giờ nhận/trả phòng của khách sạn.',
 }

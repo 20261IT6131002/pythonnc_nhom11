@@ -61,8 +61,12 @@ class CustomerRoomsMixin:
                          anchor='e', pady=(10, 0))
 
     def book_room(self, room_id):
-        fields = [('name', 'Họ và tên', ''), ('phone', 'Số điện thoại', ''),
-                  ('email', 'Email', ''), ('guests', 'Số khách', self.guests.get()),
+        account = self.c.user if self.c.user and self.c.user['role'] == 'customer' else None
+        fields = [('name', 'Họ và tên', account['name'] if account else ''),
+                  ('phone', 'Số điện thoại', account.get('phone', '') if account else ''),
+                  ('email', 'Email' if account else 'Gmail để nhận OTP xác minh đơn',
+                   account.get('email', '') if account else ''),
+                  ('guests', 'Số khách', self.guests.get()),
                   ('checkin', 'Ngày nhận (YYYY-MM-DD)', self.start.get()),
                   ('checkout', 'Ngày trả (YYYY-MM-DD)', self.end.get()),
                   ('notes', 'Ghi chú', '')]
@@ -71,6 +75,14 @@ class CustomerRoomsMixin:
             return
         try:
             value['room_id'] = room_id
+            if not account:
+                self.c.request_guest_booking_otp(value['email'])
+                otp_values = form_dialog(self, 'Xác minh email trước khi đặt phòng', [
+                    ('otp', 'Mã OTP 6 chữ số gửi tới Gmail', ''),
+                ])
+                if otp_values is None:
+                    return
+                value['guest_otp'] = otp_values['otp']
             code = self.c.book(value)
             success(self, f'Đã tiếp nhận yêu cầu đặt phòng!\n\nMã đặt phòng: {code}\n'
                           'Lưu mã này và số điện thoại để tra cứu. Lễ tân sẽ xác nhận yêu cầu.')

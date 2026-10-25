@@ -10,6 +10,9 @@ from hotel.models.common import utc_now
 class Customer(Base):
     __tablename__ = 'customers'
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Several independently verified historic profiles may be linked to one
+    # online account without rewriting original bookings/customer_id records.
+    user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), index=True, nullable=True)
     full_name: Mapped[str] = mapped_column(String(160))
     phone: Mapped[str] = mapped_column(String(25), index=True)
     email: Mapped[str] = mapped_column(String(160), default='')
