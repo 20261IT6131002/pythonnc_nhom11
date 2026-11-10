@@ -54,8 +54,6 @@ class LoginView(tk.Frame):
         illustration.pack(fill='both', expand=True, padx=22, pady=(4, 8))
         illustration.bind('<Configure>', lambda ev: hotel_art(
             illustration, max(50, ev.width), max(50, ev.height)))
-        self._label(self.left, '✦  Email xác minh    ✦  OTP bảo mật    ✦  Mật khẩu được hash',
-                    9, '#B7CAD9', DEEP_BLUE).pack(anchor='w', padx=30, pady=(7, 20))
 
         self.right = tk.Frame(body, bg=FIELD_BG)
         self.right.grid(row=0, column=1, sticky='nsew')
