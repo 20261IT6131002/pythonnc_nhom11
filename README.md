@@ -191,13 +191,4 @@ SELECT id, username, role, active, archived_at FROM users ORDER BY id DESC;
 SELECT id, user_id, phone, position FROM employees ORDER BY id DESC;
 ```
 
-Nếu **Thêm nhân viên** hoặc **Đăng ký khách** gặp lỗi trước thông báo thành công,
-transaction bị rollback nên tài khoản không xuất hiện trong MySQL. Cấu hình SMTP
-cũng phải hợp lệ vì hệ thống không cấp mật khẩu tạm/OTP giả. Đóng rồi mở lại
-Workbench hoặc Refresh schema sau khi tạo/xóa tài khoản.
 
-**Tương thích dữ liệu:** Bản N1 thêm các bảng `roles`, `user_roles`, `employees`, `system_settings`, `email_otps`; tự bổ sung hai cột nullable `users.email`, `users.email_verified_at` và chỉ mục email vào MySQL hiện có. Khi khởi động, mã migration kiểm tra cấu trúc trước khi thêm để bảo toàn tài khoản cũ. `users.role` vẫn được giữ cho các phân hệ cũ.
-
-**Giới hạn tích hợp:** Phần xác thực Customer lưu trong `users`; bảng `customers` và lịch sử đặt phòng thuộc phân hệ N3/N2. Bản N1 bổ sung liên kết qua `customers.user_id` và quy trình Admin duyệt nhưng chưa có xác thực SMS; việc đồng bộ dữ liệu N2/N3 ở các nhánh khác cần kiểm tra khi merge. Không tự động nhập hai tài khoản có cùng tên hoặc số điện thoại thành một người khi chưa xác minh danh tính. Email, họ tên và dữ liệu nghiệp vụ vẫn lưu dưới dạng thông thường trong MySQL; hash mật khẩu và OTP **không đồng nghĩa mã hóa toàn bộ database**.
-
-**N1 cập nhật ngày 25/10/2026:** Bản ghi đè mới đã bổ sung `customers.user_id`, bảng `customer_link_requests`, giao diện chờ Admin xác minh lịch sử, tách quản lý tài khoản/hồ sơ khách, và luồng cấp nhân viên Gmail mật khẩu tạm theo cách B. Đọc **`N1_HUONG_DAN_LUONG_B_20261025.md`** trước khi giải nén; bản này thay thế các hướng dẫn N1 cũ về cấp mật khẩu thủ công. Vẫn cần chạy thử migration trên MySQL thật và thử giao diện trên Windows trước khi push.
