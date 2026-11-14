@@ -6,6 +6,7 @@ from hotel.views.customer.rooms import CustomerRoomsMixin
 from hotel.views.customer.lookup import CustomerLookupMixin
 from hotel.views.customer.services import CustomerServicesMixin
 from hotel.views.customer.chat import CustomerChatMixin
+from hotel.views.customer.profile import CustomerProfileMixin
 
 
 import tkinter as tk
@@ -18,7 +19,7 @@ from hotel.views.components.theme import (BACKGROUND, DEEP, EDGE, FONT, GOLD, GO
 from hotel.views.components.widget_helpers import error, form_dialog, success
 
 
-class GuestView(CustomerHomeMixin, CustomerRoomsMixin, CustomerLookupMixin, CustomerServicesMixin, CustomerChatMixin, tk.Frame):
+class GuestView(CustomerHomeMixin, CustomerRoomsMixin, CustomerLookupMixin, CustomerServicesMixin, CustomerChatMixin, CustomerProfileMixin, tk.Frame):
     def __init__(self, parent, controller, app):
         super().__init__(parent, bg=WHITE)
         self.c, self.app = controller, app
@@ -116,6 +117,10 @@ class GuestView(CustomerHomeMixin, CustomerRoomsMixin, CustomerLookupMixin, Cust
                  10, MUTED, WHITE).pack(anchor='w', pady=(0, 8))
         solid_button(section, 'Cập nhật số điện thoại', self.update_phone, light=True).pack(
             anchor='w', pady=(0, 12))
+        try:
+            self._profile_summary(section)
+        except Exception as exc:
+            error(self, exc)
         text(section, 'ĐẶT PHÒNG CỦA TÔI', 13, NAVY, WHITE, 'bold').pack(
             anchor='w', pady=(10, 8))
         try:

@@ -46,12 +46,16 @@ def _build(title, headers, rows, footers=()):
     out.seek(0)
     return out.getvalue()
 
-def invoice_pdf(invoice):
+def invoice_pdf(invoice, customer_snapshot=None):
     b=invoice.booking
-    rows=[('Khách hàng', b.customer.full_name),('Mã đặt phòng',b.code),('Phòng',b.room.number),('Ngày nhận / trả',f'{b.checkin_date:%d/%m/%Y} - {b.checkout_date:%d/%m/%Y}'),('Tiền phòng',f'{invoice.room_amount:,.0f} VND')]
+    customer = customer_snapshot or b.customer
+    rows=[('Khách hàng', customer.full_name),('Mã đặt phòng',b.code),('Phòng',b.room.number),('Ngày nhận / trả',f'{b.checkin_date:%d/%m/%Y} - {b.checkout_date:%d/%m/%Y}'),('Tiền phòng',f'{invoice.room_amount:,.0f} VND')]
     for u in b.usages:
         rows.append((f'{u.service.name} x {u.quantity}',f'{u.unit_price * u.quantity:,.0f} VND'))
-    rows.extend([('Tiền dịch vụ',f'{invoice.services_amount:,.0f} VND'),('TỔNG CỘNG',f'{invoice.total_amount:,.0f} VND')])
+    rows.append(('Tiền dịch vụ', f'{invoice.services_amount:,.0f} VND'))
+    if invoice.discount_amount:
+        rows.append(('Khuyến mãi', f'-{invoice.discount_amount:,.0f} VND'))
+    rows.append(('TỔNG CỘNG', f'{invoice.total_amount:,.0f} VND'))
     paid=sum(p.amount for p in invoice.payments)
     return _build('HÓA ĐƠN KHÁCH SẠN - GRANDSTAY',('Nội dung','Thông tin'),rows,[f'Đã thanh toán: {paid:,.0f} VND', f'Còn thiếu: {max(0,invoice.total_amount-paid):,.0f} VND','Chứng từ do hệ thống tạo; không phải hóa đơn điện tử thuế.'])
 

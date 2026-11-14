@@ -12,9 +12,13 @@ class BaseController:
         self.user = None  # Snapshot của nhân viên; không giữ Session/ORM trong View.
 
     @contextmanager
-    def _session(self):
+    def _session(self, *, read_committed=False):
         with self.session_factory() as db:
             try:
+                if read_committed and db.get_bind().dialect.name == 'mysql':
+                    # N3 serializes writes on parent rows; avoid gap locks on
+                    # absent order tokens and promotion snapshots in MySQL.
+                    db.connection(execution_options={'isolation_level': 'READ COMMITTED'})
                 yield db
             except Exception:
                 db.rollback()

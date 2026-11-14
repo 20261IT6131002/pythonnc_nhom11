@@ -15,7 +15,7 @@ def history(db, user):
         raise PermissionError('Chỉ tài khoản khách hàng được xem lịch sử của mình.')
     records = db.scalars(select(Booking).join(Customer).where(
         Customer.user_id == user.id).order_by(Booking.id.desc()).limit(100)).all()
-    return [{'code': b.code, 'room': b.room.number,
+    return [{'id': b.id, 'code': b.code, 'room': b.room.number,
              'checkin': str(b.checkin_date), 'checkout': str(b.checkout_date),
              'status': b.status, 'customer': b.customer.full_name} for b in records]
 

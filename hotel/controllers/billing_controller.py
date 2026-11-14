@@ -7,11 +7,12 @@ from hotel.repositories.catalog import HotelRepository
 from hotel.services import business, catalog, chatbot, pdf_service
 from hotel.services.security import verify_password
 from hotel.controllers.utils import vnd
+from hotel.models.customer_services import InvoiceCustomerSnapshot
 
 
 class BillingControllerMixin:
     def make_invoice(self, booking_id):
-        with self._session() as db:
+        with self._session(read_committed=True) as db:
             actor = self._require_staff(db)
             return business.ensure_invoice(db, self._must(db, Booking, booking_id), actor).id
 
@@ -23,7 +24,8 @@ class BillingControllerMixin:
     def export_invoice(self, invoice_id, path):
         with self._session() as db:
             self._require_staff(db)
-            binary = pdf_service.invoice_pdf(self._must(db, Invoice, invoice_id))
+            invoice = self._must(db, Invoice, invoice_id)
+            binary = pdf_service.invoice_pdf(invoice, db.get(InvoiceCustomerSnapshot, invoice.id))
         Path(path).write_bytes(binary)
 
     def report(self, start, end):

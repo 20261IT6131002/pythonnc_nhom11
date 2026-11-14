@@ -94,7 +94,8 @@ def add_tree(parent, columns, rows, height=17, row_key='id'):
 def pretty(value):
     labels = {'pending': 'Chờ xác nhận', 'confirmed': 'Đã xác nhận',
               'checked_in': 'Đang ở', 'checked_out': 'Đã trả phòng',
-              'cancelled': 'Đã hủy'}
+              'cancelled': 'Đã hủy', 'completed': 'Đã hoàn thành',
+              'percent': 'Phần trăm', 'fixed': 'Số tiền'}
     if isinstance(value, str) and value in labels:
         return labels[value]
     if value is True:

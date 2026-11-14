@@ -8,6 +8,7 @@ from hotel.services import business, catalog, chatbot, pdf_service
 from hotel.services.security import verify_password
 from hotel.controllers.utils import vnd
 from hotel.models.n1_core import Employee
+from hotel.models.customer_services import InvoiceCustomerSnapshot
 
 
 class CatalogControllerMixin:
@@ -67,7 +68,9 @@ class CatalogControllerMixin:
                 return [{'id': x.id, 'name': x.name, 'price': str(x.price),
                          'active': x.active} for x in repo.services()]
             if kind == 'invoices':
-                return [{'id': x.id, 'code': x.booking.code, 'customer': x.booking.customer.full_name,
+                snapshots = {row.invoice_id: row for row in db.scalars(select(InvoiceCustomerSnapshot)).all()}
+                return [{'id': x.id, 'code': x.booking.code,
+                         'customer': (snapshots[x.id].full_name if x.id in snapshots else x.booking.customer.full_name),
                          'room': vnd(x.room_amount), 'services': vnd(x.services_amount),
                          'total': vnd(x.total_amount), 'paid': vnd(x.total_amount - business.invoice_due(x)),
                          'due': vnd(business.invoice_due(x))} for x in repo.invoices()]

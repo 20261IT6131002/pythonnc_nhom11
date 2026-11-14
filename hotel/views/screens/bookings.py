@@ -15,7 +15,8 @@ class BookingsScreenMixin:
              ('email', 'Email', ''), ('room_id', 'Phòng', choices[0] if choices else '', choices),
              ('checkin', 'Ngày nhận (YYYY-MM-DD)', str(today + timedelta(days=1))),
              ('checkout', 'Ngày trả (YYYY-MM-DD)', str(today + timedelta(days=3))),
-             ('guests', 'Số khách', '2'), ('notes', 'Ghi chú', '')])
+             ('guests', 'Số khách', '2'), ('promotion_code', 'Mã khuyến mãi (nếu có)', ''),
+             ('notes', 'Ghi chú', '')])
         if values is not None:
             values['room_id'] = choice_id(values['room_id'])
             matches = self.c.find_customers_by_phone(values['phone'])

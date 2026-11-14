@@ -7,6 +7,7 @@ from hotel.views.admin.settings import AdminSettingsMixin
 from hotel.views.screens.rooms import RoomsScreenMixin
 from hotel.views.screens.customers import CustomersScreenMixin
 from hotel.views.screens.services import ServicesScreenMixin
+from hotel.views.screens.promotions import PromotionsScreenMixin
 from hotel.views.screens.bookings import BookingsScreenMixin
 from hotel.views.screens.billing import BillingScreenMixin
 from hotel.views.screens.admin import AdminScreenMixin
@@ -23,7 +24,7 @@ from hotel.views.pages import PAGE_DESCRIPTIONS, TABLE_COLUMNS, TAB_NAMES
 
 
 class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, RoomsScreenMixin,
-                CustomersScreenMixin, ServicesScreenMixin, BookingsScreenMixin,
+                CustomersScreenMixin, ServicesScreenMixin, PromotionsScreenMixin, BookingsScreenMixin,
                 BillingScreenMixin, AdminScreenMixin, StaffChatScreenMixin, tk.Frame):
     def __init__(self, parent, controller, app):
         super().__init__(parent, bg=BACKGROUND)
@@ -98,6 +99,8 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
                 self._links_tab()
             elif tab == 'chat':
                 self._chat()
+            elif tab == 'customers':
+                self._customers_tab()
             else:
                 self._table_tab(tab)
         except Exception as exc:
@@ -125,7 +128,10 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
 
 
     def _table_tab(self, tab):
-        self.rows = self.c.table(tab)
+        loaders = {'customers': lambda: self.c.search_customers(getattr(self, 'customer_query', '')),
+                   'staying': self.c.staying_customers, 'services': self.c.service_catalog,
+                   'service_orders': self.c.service_orders, 'promotions': self.c.promotions}
+        self.rows = loaders[tab]() if tab in loaders else self.c.table(tab)
         panel = tk.Frame(self.body, bg=WHITE, highlightbackground=EDGE,
                          highlightthickness=1, padx=16, pady=16)
         panel.pack(fill='both', expand=True)
@@ -148,6 +154,22 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
             self._button(bar, 'Chuyển trạng thái', self._status)
             self._button(bar, 'Thêm dịch vụ', self._usage)
             self._button(bar, 'Chốt hóa đơn', self._invoice)
+            extra = ttk.Frame(panel)
+            extra.pack(fill='x', pady=(0, 8))
+            self._button(extra, 'Người lưu trú', self._booking_guests)
+            self._button(extra, 'Yêu cầu dịch vụ', lambda: self._request_service(True))
+            self._button(extra, 'Áp dụng khuyến mãi', self._apply_promotion)
+        elif tab == 'staying':
+            self._button(bar, 'Danh sách người lưu trú', self._booking_guests, True)
+            self._button(bar, 'Yêu cầu dịch vụ', lambda: self._request_service(True))
+        elif tab == 'service_orders':
+            self._button(bar, 'Tạo yêu cầu', self._request_service, True)
+            self._button(bar, 'Xác nhận', lambda: self._service_order_status('confirmed'))
+            self._button(bar, 'Hoàn thành', lambda: self._service_order_status('completed'))
+            self._button(bar, 'Hủy yêu cầu', lambda: self._service_order_status('cancelled'))
+        elif tab == 'promotions' and self.admin:
+            self._button(bar, 'Thêm khuyến mãi', self._edit_promotion, True)
+            self._button(bar, 'Sửa / bật tắt', lambda: self._edit_promotion(True))
         elif tab == 'services' and self.admin:
             self._button(bar, 'Thêm dịch vụ', lambda: self._edit_service(False), True)
             self._button(bar, 'Sửa / bật tắt', lambda: self._edit_service(True))

@@ -39,7 +39,7 @@ def find_rooms(db: Session, checkin=None, checkout=None, room_type_id=None, gues
 def log_event(db, actor_id, action, details=''):
     db.add(AuditLog(actor_id=actor_id, action=action, details=str(details)[:300]))
 
-def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkout, guests, notes='', status='pending', actor_id=None, customer_id=None):
+def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkout, guests, notes='', status='pending', actor_id=None, customer_id=None, promotion_code=''):
     dates_in_order(checkin, checkout)
     name, phone = str(name).strip(), str(phone).strip()
     if len(name) < 2 or not 8 <= len(phone) <= 20:
@@ -70,6 +70,11 @@ def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkou
         checkin_date=checkin, checkout_date=checkout, guests=guests, nightly_price=room.room_type.nightly_price,
         notes=notes.strip()[:1000], status=status)
     db.add(booking)
+    if str(promotion_code).strip():
+        from hotel.services.promotions import redeem
+
+        db.flush()
+        redeem(db, booking.id, promotion_code, actor_id, commit=False)
     log_event(db, actor_id, 'booking.create', booking.code)
     db.commit()
     db.refresh(booking)
@@ -92,6 +97,15 @@ def change_booking_status(db, booking, new_status, actor_id):
     db.commit()
 
 def add_service_usage(db, booking, service, quantity, actor_id):
+    from hotel.models.customer_services import ServiceDetails
+    from hotel.services.service_orders import locked_booking
+
+    booking = locked_booking(db, booking.id)
+    service = db.scalar(select(HotelService).where(HotelService.id == service.id)
+                        .with_for_update().execution_options(populate_existing=True))
+    details = db.scalar(select(ServiceDetails).where(ServiceDetails.service_id == service.id).with_for_update())
+    if details and details.requires_schedule:
+        raise ValueError('Dịch vụ có lịch hẹn cần tạo yêu cầu và xác nhận trước khi hoàn thành.')
     if booking.status != 'checked_in':
         raise ValueError('Chỉ thêm dịch vụ cho khách đã nhận phòng.')
     if not service.active or quantity < 1 or quantity > 1000:
@@ -107,15 +121,31 @@ def invoice_due(invoice):
     return max(Decimal('0'), invoice.total_amount - paid)
 
 def ensure_invoice(db,booking,actor_id=None):
+    from hotel.models.customer_services import BookingPromotion, ServiceOrder
+    from hotel.services.customers import snapshot_invoice_customer
+    from hotel.services.service_orders import locked_booking
+
+    booking = locked_booking(db, booking.id)
     if booking.status not in ('checked_in', 'checked_out'):
         raise ValueError('Chỉ lập hóa đơn cho khách đã nhận phòng.')
-    if booking.invoice is not None:
-        return booking.invoice
+    existing = db.scalar(select(Invoice).where(Invoice.booking_id == booking.id).with_for_update())
+    if existing is not None:
+        return existing
+    outstanding = db.scalar(select(ServiceOrder.id).where(ServiceOrder.booking_id == booking.id,
+        ServiceOrder.status.in_(('pending', 'confirmed'))).limit(1).with_for_update())
+    if outstanding:
+        raise ValueError('Còn yêu cầu dịch vụ chưa hoàn thành hoặc hủy; cần xử lý trước khi chốt hóa đơn.')
     nights=(booking.checkout_date-booking.checkin_date).days
     room_amount=booking.nightly_price * nights
-    services_amount=sum((u.unit_price*u.quantity for u in booking.usages), Decimal('0'))
-    invoice=Invoice(booking_id=booking.id,room_amount=room_amount,services_amount=services_amount,total_amount=room_amount+services_amount, discount_amount=Decimal('0'))
+    usages = db.scalars(select(ServiceUsage).where(ServiceUsage.booking_id == booking.id).with_for_update()).all()
+    services_amount=sum((u.unit_price*u.quantity for u in usages), Decimal('0'))
+    promotion = db.scalar(select(BookingPromotion).where(BookingPromotion.booking_id == booking.id).with_for_update())
+    discount = min(room_amount, promotion.discount_amount) if promotion else Decimal('0')
+    invoice=Invoice(booking_id=booking.id,room_amount=room_amount,services_amount=services_amount,total_amount=room_amount+services_amount-discount, discount_amount=discount)
     db.add(invoice)
+    db.flush()
+    customer = db.scalar(select(Customer).where(Customer.id == booking.customer_id).with_for_update())
+    snapshot_invoice_customer(db, invoice, customer)
     log_event(db, actor_id, 'invoice.create', booking.code)
     db.commit()
     db.refresh(invoice)

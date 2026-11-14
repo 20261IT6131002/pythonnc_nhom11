@@ -69,6 +69,7 @@ class CustomerRoomsMixin:
                   ('guests', 'Số khách', self.guests.get()),
                   ('checkin', 'Ngày nhận (YYYY-MM-DD)', self.start.get()),
                   ('checkout', 'Ngày trả (YYYY-MM-DD)', self.end.get()),
+                  ('promotion_code', 'Mã khuyến mãi (nếu có)', ''),
                   ('notes', 'Ghi chú', '')]
         value = form_dialog(self, 'Đặt phòng GrandStay', fields)
         if value is None:

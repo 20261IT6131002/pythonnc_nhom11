@@ -8,3 +8,5 @@ from hotel.models.services import HotelService, ServiceUsage
 from hotel.models.billing import Invoice, Payment
 from hotel.models.audit import AuditLog
 from hotel.models.n1_core import Role, UserRole, Employee, SystemSetting, EmailOtp, CustomerLinkRequest
+from hotel.models.customer_services import (BookingGuest, BookingPromotion, CustomerProfile,
+                                           InvoiceCustomerSnapshot, Promotion, ServiceDetails, ServiceOrder)

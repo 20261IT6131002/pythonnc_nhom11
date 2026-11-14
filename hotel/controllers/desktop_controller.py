@@ -6,12 +6,13 @@ from hotel.controllers.catalog_controller import CatalogControllerMixin
 from hotel.controllers.rooms_controller import RoomsControllerMixin
 from hotel.controllers.customers_controller import CustomersControllerMixin
 from hotel.controllers.services_controller import ServicesControllerMixin
+from hotel.controllers.promotions_controller import PromotionsControllerMixin
 from hotel.controllers.admin_controller import AdminControllerMixin
 from hotel.controllers.bookings_controller import BookingsControllerMixin
 from hotel.controllers.billing_controller import BillingControllerMixin
 from hotel.controllers.chat_controller import ChatControllerMixin
 
 
-class DesktopController(AuthControllerMixin, CatalogControllerMixin, RoomsControllerMixin, CustomersControllerMixin, ServicesControllerMixin, AdminControllerMixin, BookingsControllerMixin, BillingControllerMixin, ChatControllerMixin, BaseController):
+class DesktopController(AuthControllerMixin, CatalogControllerMixin, RoomsControllerMixin, CustomersControllerMixin, ServicesControllerMixin, PromotionsControllerMixin, AdminControllerMixin, BookingsControllerMixin, BillingControllerMixin, ChatControllerMixin, BaseController):
     """UI-facing Controller, composed from focused domain controllers."""
     pass

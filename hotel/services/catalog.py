@@ -75,7 +75,9 @@ def toggle_room(db, actor_id, room):
     db.commit()
 
 
-def save_customer(db, actor_id, customer, name, phone, email='', document_no=''):
+def save_customer(db, actor_id, customer, name, phone, email='', document_no='', **profile):
+    from hotel.services.customers import preserve_invoice_customers, update_profile
+
     name = checked_name(name)
     phone = checked_name(phone, 8, 20)
     if customer is not None and customer.user_id is not None and customer.phone != phone:
@@ -83,21 +85,33 @@ def save_customer(db, actor_id, customer, name, phone, email='', document_no='')
     if customer is None:
         customer = Customer()
         db.add(customer)
+    else:
+        preserve_invoice_customers(db, customer)
     customer.full_name, customer.phone = name, phone
     customer.email, customer.document_no = str(email).strip()[:160], str(document_no).strip()[:70]
+    db.flush()
+    if profile:
+        update_profile(db, customer, profile)
     log_event(db, actor_id, 'customer.save', name)
     db.commit()
+    return customer.id
 
 
-def save_service(db, actor_id, service, name, price, active=True):
+def save_service(db, actor_id, service, name, price, active=True, **details):
+    from hotel.services.service_orders import update_details
+
     if service is None:
         service = HotelService()
         db.add(service)
     service.name = checked_name(name, 2, 130)
     service.price = money(price)
     service.active = bool(active)
+    db.flush()
+    if details:
+        update_details(db, service, details)
     log_event(db, actor_id, 'service.save', service.name)
     db.commit()
+    return service.id
 
 
 def add_user(db, actor_id, username, name, password, role):

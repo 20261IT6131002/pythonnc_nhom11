@@ -19,7 +19,7 @@ class BookingsControllerMixin:
 
     def book(self, values):
         start, end = date.fromisoformat(values['checkin']), date.fromisoformat(values['checkout'])
-        with self._session() as db:
+        with self._session(read_committed=bool(values.get('promotion_code'))) as db:
             actor, selected_customer = None, None
             name, phone, email = values['name'], values['phone'], values.get('email', '')
             if self.user:
@@ -54,7 +54,8 @@ class BookingsControllerMixin:
                 email=email, room_id=int(values['room_id']),
                 checkin=start, checkout=end, guests=catalog.positive_int(values['guests'], 1, 30),
                 notes=values.get('notes', ''), status='confirmed' if actor else 'pending',
-                actor_id=actor, customer_id=selected_customer)
+                actor_id=actor, customer_id=selected_customer,
+                promotion_code=values.get('promotion_code', ''))
             return booking.code
 
     def lookup(self, code, phone):
