@@ -10,7 +10,7 @@ import queue
 import threading
 from datetime import date, timedelta
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import ttk, simpledialog, filedialog
 
 
 NAVY = '#18354e'
@@ -82,6 +82,10 @@ class ChatPanel(tk.Frame):
                  anchor='w').pack(fill='x', pady=(8, 0))
         quick = tk.Frame(self, bg=BACKGROUND, padx=10, pady=7)
         quick.pack(side='top', fill='x')
+        if self.role == 'admin':
+            tk.Button(quick, text='Xuất báo cáo PDF', command=self.export_report,
+                      bg=WHITE, fg=NAVY, relief='groove', bd=1,
+                      cursor='hand2').pack(side='right', padx=(5, 0))
         tk.Button(quick, text='Lịch sử', command=self.show_history,
                   bg=WHITE, fg=NAVY, relief='groove', bd=1, cursor='hand2').pack(side='right', padx=(5, 0))
         tk.Button(quick, text='Chat mới', command=self.new_chat,
@@ -171,8 +175,6 @@ class ChatPanel(tk.Frame):
                     self.pending = result.get('confirmation')
                     if result.get('login_required') and self.role == 'guest':
                         self.pending = {'login_required': True, 'label': 'Đăng nhập / Đăng ký'}
-                    if self.pending and self.pending.get('otp_required') and 'Đã gửi mã OTP' in result.get('reply',''):
-                        self.pending['otp_sent'] = True
                     self._show_confirmation()
                 else:
                     self._append('bot', 'Không thể thực hiện yêu cầu: ' + result)
@@ -193,9 +195,9 @@ class ChatPanel(tk.Frame):
                       command=self._go_login, bg='#147b55', fg=WHITE, bd=0,
                       padx=12, pady=6, cursor='hand2').pack(side='left')
             return
-        tk.Label(self.confirm_frame, text='Chỉ tạo đơn sau khi bạn chủ động xác nhận:',
+        tk.Label(self.confirm_frame, text='Hệ thống chỉ thực hiện sau khi bạn xác nhận:',
                  bg=WHITE, fg=NAVY, font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(3, 5))
-        tk.Button(self.confirm_frame, text=('Gửi mã OTP' if self.pending.get('otp_required') and not self.pending.get('otp_sent') else '✓ Xác nhận đặt phòng'),
+        tk.Button(self.confirm_frame, text='✓ ' + self.pending.get('label','Xác nhận thao tác'),
                   command=self.confirm, bg='#147b55', fg=WHITE, bd=0, padx=12, pady=6,
                   cursor='hand2').pack(side='left', padx=(0, 8))
         tk.Button(self.confirm_frame, text='Hủy yêu cầu', command=self.cancel,
@@ -224,21 +226,10 @@ class ChatPanel(tk.Frame):
             self._go_login()
             return
         token = self.pending['token']
-        if self.pending.get('otp_required') and not self.pending.get('otp_sent'):
-            self._set_busy(True)
-            self._run(self.controller.chat_request_otp, self.session_id, token)
-            # The response tells _poll that OTP has been sent.
-            return
-        otp = None
-        if self.pending.get('otp_required'):
-            otp = simpledialog.askstring('Xác thực email', 'Nhập mã OTP 6 số đã nhận qua email:',
-                                         parent=self, show='*')
-            if otp is None:
-                return
         self._set_busy(True)
         self.pending = None
         self._show_confirmation()
-        self._run(self.controller.chat_confirm, self.session_id, token, otp)
+        self._run(self.controller.chat_confirm, self.session_id, token, None)
 
     def cancel(self):
         if self._busy or not self.pending:
@@ -254,6 +245,29 @@ class ChatPanel(tk.Frame):
         self.pending = None
         self._show_confirmation()
         self._run(self.controller.chat_cancel, self.session_id, token)
+
+    def export_report(self):
+        if self.role != 'admin' or self._busy:
+            return
+        from datetime import date, timedelta
+        end = date.today()
+        start = end - timedelta(days=29)
+        begin = simpledialog.askstring('Báo cáo doanh thu', 'Ngày bắt đầu YYYY-MM-DD:',
+                                       initialvalue=start.isoformat(), parent=self)
+        if not begin:
+            return
+        until = simpledialog.askstring('Báo cáo doanh thu', 'Ngày kết thúc YYYY-MM-DD:',
+                                       initialvalue=end.isoformat(), parent=self)
+        if not until:
+            return
+        target = filedialog.asksaveasfilename(parent=self, title='Lưu báo cáo GrandStay',
+                                             defaultextension='.pdf',
+                                             filetypes=[('PDF','*.pdf')],
+                                             initialfile='GrandStay_DoanhThu.pdf')
+        if not target:
+            return
+        self._set_busy(True)
+        self._run(self.controller.chat_export_revenue_pdf, begin, until, target)
 
     def show_history(self):
         if self._busy:

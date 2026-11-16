@@ -253,8 +253,10 @@ def execute(db, role, user_id, action, args, context):
         else:
             q = select(Booking).where(Booking.status == 'pending')
             title = 'Đặt phòng chờ xác nhận'
+        total = db.scalar(select(func.count()).select_from(q.order_by(None).subquery())) or 0
         rows = db.scalars(q.order_by(Booking.id.desc()).limit(20)).all()
-        return (f'{title} ({day:%d/%m/%Y}): {len(rows)} bản ghi hiển thị.\n' +
+        when = f' ({day:%d/%m/%Y})' if action != 'pending_bookings' else ''
+        return (f'{title}{when}: tổng {total} đơn; hiển thị {len(rows)} đơn gần nhất.\n' +
                 ('\n'.join(f'• {b.code}, phòng #{b.room_id}, {_status(b)}' for b in rows)
                  if rows else 'Không có bản ghi phù hợp.')), {}, None
     if action == 'revenue':
@@ -263,6 +265,44 @@ def execute(db, role, user_id, action, args, context):
         return (f'Tiền thực thu từ {start:%d/%m/%Y} đến {end:%d/%m/%Y}: '
                 f'{_vnd(total)} từ {len(payments)} giao dịch ghi nhận. '
                 'Đây là tiền thực thu, không phải doanh thu kế toán.'), {}, None
+    if action == 'revenue_compare':
+        start, end = _range(args)
+        span = (end-start).days + 1
+        previous_start, previous_end = start - timedelta(days=span), start - timedelta(days=1)
+        _, current_total = business.revenue_summary(db, start, end)
+        _, previous_total = business.revenue_summary(db, previous_start, previous_end)
+        change_amount = current_total - previous_total
+        pct = (change_amount / previous_total * 100) if previous_total else None
+        trend = f'{pct:+.1f}%' if pct is not None else 'không tính % vì kỳ trước bằng 0'
+        return (f'So sánh TIỀN THỰC THU: kỳ {start:%d/%m/%Y}–{end:%d/%m/%Y}: {_vnd(current_total)}; '
+                f'kỳ trước {previous_start:%d/%m/%Y}–{previous_end:%d/%m/%Y}: {_vnd(previous_total)}; '
+                f'chênh lệch {_vnd(change_amount)} ({trend}).'), {}, None
+    if action == 'revenue_trend':
+        try:
+            months = int(args.get('months') or 6)
+        except (ValueError, TypeError) as exc:
+            raise ValueError('Số tháng thống kê không hợp lệ.') from exc
+        if not 3 <= months <= 12:
+            raise ValueError('Chỉ thống kê từ 3 đến 12 tháng gần đây.')
+        today = date.today()
+        year, month = today.year, today.month
+        labels = []
+        values = []
+        for index in range(months - 1, -1, -1):
+            serial = year * 12 + month - 1 - index
+            y, m = divmod(serial, 12)
+            m += 1
+            next_y, next_m = (y+1, 1) if m == 12 else (y, m+1)
+            first = date(y, m, 1)
+            last = min(today, date(next_y, next_m, 1) - timedelta(days=1))
+            _, total = business.revenue_summary(db, first, last)
+            labels.append(f'{m:02d}/{y}: {_vnd(total)}')
+            values.append(total)
+        if not values:
+            return 'Không có kỳ thống kê.', {}, None
+        return ('Xu hướng tiền thực thu theo tháng (không phải doanh thu kế toán):\n• '
+                + '\n• '.join(labels) + '\nTổng các tháng: '
+                + _vnd(sum(values, Decimal('0')))), {}, None
     if action == 'occupancy':
         day = _date(args.get('date_from') or date.today().isoformat(), 'Ngày thống kê')
         total = db.scalar(select(func.count()).select_from(Room).where(Room.active.is_(True))) or 0
@@ -321,10 +361,20 @@ def booking_fields(text, base=None):
     iso = re.findall(r'\b\d{4}-\d{2}-\d{2}\b', text)
     vn = re.findall(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', text)
     dates = iso + [f'{year}-{int(month):02d}-{int(day):02d}' for day,month,year in vn]
-    if dates:
-        data['checkin'] = dates[0]
+    # A standalone date supplied after check-in answers the checkout question.
+    # Explicit 'nhận' / 'trả' overrides this contextual interpretation.
     if len(dates) >= 2:
-        data['checkout'] = dates[1]
+        data['checkin'], data['checkout'] = dates[:2]
+    elif len(dates) == 1:
+        if re.search(r'\b(?:tra|checkout|check-out)\b', q) or (
+                data.get('checkin') and not data.get('checkout') and
+                not re.search(r'\b(?:nhan|checkin|check-in)\b', q)):
+            data['checkout'] = dates[0]
+        else:
+            data['checkin'] = dates[0]
+            # If the arrival date changes, a previous departure may be stale.
+            if data.get('checkout') and data['checkout'] <= data['checkin']:
+                data.pop('checkout', None)
     if 'ngay kia' in q:
         data['checkin'] = (today + timedelta(days=2)).isoformat()
     elif 'ngay mai' in q:
@@ -334,7 +384,7 @@ def booking_fields(text, base=None):
     nights = re.search(r'\b(?:o|trong|thue|dat)?\s*(\d{1,2})\s*(?:dem|ngay)\b', q)
     if nights:
         data['nights'] = int(nights.group(1))
-    if 'checkin' in data and data.get('nights') and len(dates) < 2:
+    if 'checkin' in data and data.get('nights') and len(dates) < 2 and not re.search(r'\b(?:tra|checkout|check-out)\b', q):
         try:
             data['checkout'] = (date.fromisoformat(data['checkin']) + timedelta(days=data['nights'])).isoformat()
         except ValueError:
@@ -369,7 +419,13 @@ def booking_dialogue(db, role, user_id, message, context):
     if not slots.get('checkin'):
         return ('Bạn đã đăng nhập. Bạn muốn nhận phòng ngày nào? Ví dụ: ngày mai hoặc 15/11/2026.', changes, None)
     if not slots.get('checkout'):
-        return ('Bạn muốn ở mấy đêm? Ví dụ: 2 đêm hoặc 3 đêm.', changes, None)
+        return ('Bạn muốn trả phòng ngày nào hoặc ở mấy đêm? Ví dụ: 20/11/2026 hoặc 3 đêm.', changes, None)
+    if slots.get('checkin') and slots.get('checkout'):
+        try:
+            business.dates_in_order(date.fromisoformat(slots['checkin']), date.fromisoformat(slots['checkout']))
+        except (ValueError, TypeError) as exc:
+            changes['booking_flow'] = {**slots, 'checkout': None}
+            return ('Ngày nhận/trả phòng chưa hợp lệ: ' + str(exc) + '. Bạn muốn trả phòng ngày nào?', changes, None)
     if not slots.get('guests'):
         return ('Có bao nhiêu khách lưu trú? Ví dụ: 2 người.', changes, None)
     try:
@@ -390,3 +446,99 @@ def booking_dialogue(db, role, user_id, message, context):
             return (str(exc) + ' Hãy cung cấp ngày nhận/trả hợp lệ.', changes, None)
         changes['booking_flow'] = None
         return (str(exc) + ' Hãy thử tìm phòng hoặc chọn phòng khác.', changes, None)
+
+
+# Deterministic, role-restricted intent parser. No AI can authorize DB mutations.
+def mutation_intent(text, role):
+    q = _booking_plain(text)
+    code = re.search(r'\bBK-[A-Za-z0-9]{5,20}\b', str(text), re.I)
+    if not code:
+        return None
+    code = code.group(0).upper()
+    dates = re.findall(r'\b\d{4}-\d{2}-\d{2}\b', str(text))
+    dates += [f'{y}-{int(m):02d}-{int(d):02d}'
+              for d,m,y in re.findall(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', str(text))]
+    if role == 'customer':
+        if re.search(r'\b(?:doi|sua|thay)\s+(?:ngay|lich|ngay nhan|ngay tra)', q):
+            if len(dates) < 2:
+                return {'tool': 'booking_date_help', 'code': code}
+            return {'tool': 'booking_change_dates', 'code': code,
+                    'checkin': dates[0], 'checkout': dates[1]}
+        if re.search(r'\b(?:huy|cancel)\s+(?:don|dat phong|phong)', q):
+            return {'tool': 'customer_cancel', 'code': code}
+        return None
+    if role not in {'admin', 'receptionist'}:
+        return None
+    if re.search(r'\b(?:doi|sua|thay)\s+(?:ngay|lich|ngay nhan|ngay tra)', q):
+        if len(dates) < 2:
+            return {'tool': 'booking_date_help', 'code': code}
+        return {'tool': 'booking_change_dates', 'code': code,
+                'checkin': dates[0], 'checkout': dates[1]}
+    # The order is important: checkout before checkin, confirm before generic actions.
+    if re.search(r'\b(?:check[ -]?out|tra phong)\b', q):
+        return {'tool': 'staff_status', 'code': code, 'status': 'checked_out'}
+    if re.search(r'\b(?:check[ -]?in|nhan phong)\b', q):
+        return {'tool': 'staff_status', 'code': code, 'status': 'checked_in'}
+    if re.search(r'\b(?:huy don|huy dat phong|cancel)\b', q):
+        return {'tool': 'staff_status', 'code': code, 'status': 'cancelled'}
+    if re.search(r'\b(?:xac nhan don|duyet don|confirm booking)\b', q):
+        return {'tool': 'staff_status', 'code': code, 'status': 'confirmed'}
+    quantity = re.search(r'\b(?:so luong|sl|x)\s*(\d{1,3})\b', q)
+    service = re.search(r'\b(?:dich vu|dv)\s*(?:so|id|#)?\s*(\d+)\b', q)
+    if re.search(r'\b(?:them|ghi nhan)\s+(?:dich vu|dv)\b', q) and service:
+        return {'tool': 'staff_add_service', 'code': code,
+                'service_id': int(service.group(1)), 'quantity': int(quantity.group(1)) if quantity else 1}
+    return None
+
+
+def staff_booking_dialogue(db, role, user_id, message, context):
+    """Collect one field at a time; staff confirms before committing to MySQL."""
+    if role not in ('admin', 'receptionist') or not user_id:
+        return None
+    existing = context.get('staff_booking_flow')
+    if not wants_to_book(message) and not existing:
+        return None
+    q = _booking_plain(message)
+    if existing and any(x in q for x in ('huy yeu cau', 'khong dat nua', 'dung dat phong')):
+        return 'Đã hủy yêu cầu lập đơn tại quầy.', {'staff_booking_flow': None}, None
+    slots = booking_fields(message, existing if isinstance(existing, dict) else {})
+    slots['active'] = True
+    phone = re.search(r'(?<!\d)(?:\+84|0)\d{9,10}(?!\d)', message)
+    if phone:
+        slots['phone'] = phone.group(0)
+    # Capture name only with an explicit phrase, never from a guess.
+    name = re.search(r'(?:tên khách|khách tên|họ tên)\s*[:：]?\s*([A-Za-zÀ-ỹ][A-Za-zÀ-ỹ\s]{1,75})', message, re.I)
+    if name:
+        slots['name'] = name.group(1).strip()
+    changes = {'staff_booking_flow': slots}
+    if not slots.get('checkin'):
+        return 'Lễ tân muốn nhận phòng ngày nào?', changes, None
+    if not slots.get('checkout'):
+        return 'Ngày trả phòng hoặc số đêm lưu trú là bao nhiêu?', changes, None
+    try:
+        business.dates_in_order(date.fromisoformat(slots['checkin']), date.fromisoformat(slots['checkout']))
+    except (ValueError, TypeError) as exc:
+        slots['checkout'] = None
+        return 'Ngày không hợp lệ: ' + str(exc) + '. Hãy nhập lại ngày trả.', changes, None
+    if not slots.get('guests'):
+        return 'Đơn tại quầy này có bao nhiêu khách?', changes, None
+    if not slots.get('room_number'):
+        msg, details, _ = execute(db, role, user_id, 'room_search',
+            {'checkin':slots['checkin'], 'checkout':slots['checkout'], 'guests':slots['guests']}, context)
+        changes.update(details)
+        return msg + '\nLễ tân chọn phòng số mấy?', changes, None
+    if len(str(slots.get('name',''))) < 2:
+        return 'Nhập họ tên khách, ví dụ: tên khách Nguyễn Văn An.', changes, None
+    if not re.fullmatch(r'(?:\+?\d[\d .-]{7,18}\d|\d{8,20})', str(slots.get('phone',''))):
+        return 'Nhập số điện thoại khách, ví dụ: 0912345678.', changes, None
+    try:
+        msg, results, request = execute(db, role, user_id, 'booking_prepare',
+            {'checkin':slots['checkin'], 'checkout':slots['checkout'], 'guests':slots['guests'],
+             'room_id':slots['room_number'], 'name':slots['name'], 'phone':slots['phone']}, context)
+        changes.update(results)
+        if request:
+            changes['staff_booking_flow'] = None
+        return msg, changes, request
+    except (ValueError, PermissionError) as exc:
+        slots.pop('room_number', None)
+        return str(exc) + ' Vui lòng chọn phòng khác.', changes, None

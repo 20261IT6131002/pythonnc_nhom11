@@ -11,11 +11,14 @@ from uuid import uuid4
 from datetime import timedelta
 
 from sqlalchemy import select
+from hotel.models.entities import Booking, Customer, HotelService, BookingPromotion, ServiceOrder
+from hotel.services import business, pdf_service
+from pathlib import Path
 
 from hotel.models.chat import ChatSession, ChatMessage, ChatToolCall
 from hotel.models.common import utc_now
 from hotel.services import chatbot as legacy_chatbot
-from hotel.services.chatbot_engine import execute, wants_to_book, booking_fields, booking_dialogue
+from hotel.services.chatbot_engine import execute, wants_to_book, booking_fields, booking_dialogue, mutation_intent, staff_booking_dialogue
 from hotel.services.gemini_client import GeminiError, ROLE_ACTIONS, plan_message, fallback_plan
 
 
@@ -76,11 +79,18 @@ class ChatControllerMixin:
         # V5: account gate is evaluated BEFORE calling Gemini (including fallback).
         # Pricing / room search remain public. A booking request never calls
         # a date parser or booking tool for unauthenticated guests.
+        mutation = mutation_intent(message, role)
         guest_booking_gate = role == 'guest' and wants_to_book(message)
+        staff_booking_flow = role in ('admin','receptionist') and (
+            wants_to_book(message) or bool(context.get('staff_booking_flow')))
         customer_booking_flow = role == 'customer' and (
             wants_to_book(message) or bool(context.get('booking_flow')))
-        if guest_booking_gate:
+        if mutation:
+            plan = {'action': 'mutation_prepare', 'args': mutation}
+        elif guest_booking_gate:
             plan = {'action': 'login_gate', 'args': {}}
+        elif staff_booking_flow:
+            plan = {'action': 'staff_booking_dialogue', 'args': {}}
         elif customer_booking_flow:
             plan = {'action': 'booking_dialogue', 'args': {}}
         else:
@@ -115,6 +125,12 @@ class ChatControllerMixin:
                                   'Sau khi đăng nhập, tôi sẽ tiếp tục hỏi thông tin đặt phòng. '
                                   'Chưa có đơn nào được tạo.')
                     changes = {'booking_flow': None}
+                elif action == 'mutation_prepare':
+                    reply_text, pending_request = self._chat_prepare_mutation(db, role, user_id, args)
+                    changes = {}
+                elif action == 'staff_booking_dialogue':
+                    reply_text, changes, pending_request = staff_booking_dialogue(
+                        db, role, user_id, message, context)
                 elif action == 'booking_dialogue':
                     reply_text, changes, pending_request = booking_dialogue(
                         db, role, user_id, message, context)
@@ -158,11 +174,13 @@ class ChatControllerMixin:
                 for old in old_calls:
                     old.status = 'cancelled'
                 token = str(uuid4())
-                db.add(ChatToolCall(session_id=session.id, tool_name='create_booking',
-                    arguments_json=json.dumps(pending_request, ensure_ascii=False),
+                tool_name = pending_request.get('_tool', 'create_booking')
+                safe_request = {k:v for k,v in pending_request.items() if k != '_tool'}
+                db.add(ChatToolCall(session_id=session.id, tool_name=tool_name,
+                    arguments_json=json.dumps(safe_request, ensure_ascii=False),
                     status='awaiting_confirmation', confirmation_required=True,
                     confirmed_by_user=False, idempotency_key=token))
-                confirmation = {'token': token, 'label': 'Xác nhận đặt phòng', 'otp_required': False}
+                confirmation = {'token': token, 'label': 'Xác nhận đặt phòng' if tool_name == 'create_booking' else 'Xác nhận thao tác', 'otp_required': False}
             elif action != 'reply':
                 # The following is only an audit record, not an authorisation.
                 db.add(ChatToolCall(session_id=session.id, tool_name=action,
@@ -255,47 +273,212 @@ class ChatControllerMixin:
             return {'session_id': session.public_id, 'reply': reply_text,
                     'confirmation': confirmation}
 
+    def _chat_prepare_mutation(self, db, role, user_id, args):
+        """Validate ownership/state BEFORE showing a one-time confirmation button."""
+        tool = args.get('tool')
+        if role == 'guest' or not user_id:
+            raise PermissionError('Vui lòng đăng nhập để thực hiện yêu cầu.')
+        booking = db.scalar(select(Booking).where(Booking.code == str(args.get('code','')).upper()))
+        if not booking:
+            raise ValueError('Không tìm thấy mã đặt phòng.')
+        if role == 'customer' and not db.scalar(select(Customer.id).where(
+                Customer.id == booking.customer_id, Customer.user_id == user_id)):
+            raise PermissionError('Bạn chỉ được thao tác trên đơn của chính mình.')
+        if tool == 'booking_date_help':
+            return ('Để đổi lịch, hãy gửi một tin nhắn gồm mã đơn và cả ngày nhận/trả mới. '
+                    'Ví dụ: đổi ngày đơn ' + booking.code + ' sang 21/11/2026 đến 23/11/2026.', None)
+        if tool == 'booking_change_dates':
+            from datetime import date
+            if role == 'customer' and not db.scalar(select(Customer.id).where(
+                    Customer.id == booking.customer_id, Customer.user_id == user_id)):
+                raise PermissionError('Bạn chỉ được đổi ngày đơn của chính mình.')
+            if booking.status != 'pending' or booking.invoice is not None:
+                raise ValueError('Chỉ được đổi ngày đơn đang chờ, chưa lập hóa đơn.')
+            if db.get(BookingPromotion, booking.id) or db.scalar(select(ServiceOrder.id).where(
+                    ServiceOrder.booking_id == booking.id, ServiceOrder.status.in_(('pending','confirmed')))):
+                raise ValueError('Đơn có khuyến mãi hoặc yêu cầu dịch vụ đang xử lý; vui lòng liên hệ lễ tân để đổi lịch.')
+            start, end = date.fromisoformat(args['checkin']), date.fromisoformat(args['checkout'])
+            business.dates_in_order(start, end)
+            if db.scalar(business.conflicting_query(booking.room_id, start, end).where(
+                    Booking.id != booking.id)) is not None:
+                raise ValueError('Phòng đã có lịch trùng trong khoảng ngày mới.')
+            return (f'Đổi lịch đơn {booking.code} thành {start:%d/%m/%Y}–{end:%d/%m/%Y}? '
+                    'Giá phòng/đêm hiện giữ theo đơn gốc; tổng tiền thay đổi theo số đêm.',
+                    {'_tool': tool, 'code': booking.code, 'checkin': start.isoformat(), 'checkout': end.isoformat()})
+        if tool == 'customer_cancel':
+            if role != 'customer' or not db.scalar(select(Customer.id).where(
+                    Customer.id == booking.customer_id, Customer.user_id == user_id)):
+                raise PermissionError('Bạn chỉ được hủy đơn thuộc tài khoản của mình.')
+            if booking.status != 'pending' or booking.invoice is not None:
+                raise ValueError('Chatbot chỉ cho phép khách tự hủy đơn đang chờ, chưa lập hóa đơn. Vui lòng liên hệ lễ tân.')
+            if db.get(BookingPromotion, booking.id) or db.scalar(select(ServiceOrder.id).where(
+                    ServiceOrder.booking_id == booking.id, ServiceOrder.status.in_(('pending','confirmed')))):
+                raise ValueError('Đơn có khuyến mãi hoặc dịch vụ đang xử lý; vui lòng liên hệ lễ tân để hủy.')
+            return (f'Bạn có chắc muốn HỦY đặt phòng {booking.code}? Thao tác sẽ đổi trạng thái đơn.',
+                    {'_tool': tool, 'code': booking.code})
+        if role not in ('admin','receptionist'):
+            raise PermissionError('Chức năng chỉ dành cho nhân viên.')
+        if tool == 'staff_status':
+            status = str(args.get('status',''))
+            allowed = {'pending': {'confirmed','cancelled'}, 'confirmed': {'checked_in','cancelled'},
+                       'checked_in': {'checked_out'}}
+            if status not in allowed.get(booking.status, set()):
+                raise ValueError(f'Không thể chuyển từ {booking.status} sang {status}.')
+            if status == 'checked_out' and (booking.invoice is None or business.invoice_due(booking.invoice) > 0):
+                raise ValueError('Không thể trả phòng khi chưa lập và thanh toán đủ hóa đơn.')
+            return (f'Nhân viên xác nhận đổi trạng thái đơn {booking.code}: {booking.status} → {status}?',
+                    {'_tool': tool, 'code': booking.code, 'status': status})
+        if tool == 'staff_add_service':
+            service = db.get(HotelService, int(args['service_id']))
+            qty = int(args['quantity'])
+            if not service or not service.active or not 1 <= qty <= 100:
+                raise ValueError('Dịch vụ hoặc số lượng không hợp lệ.')
+            if booking.status != 'checked_in' or booking.invoice is not None:
+                raise ValueError('Chỉ ghi dịch vụ khi đã nhận phòng và chưa chốt hóa đơn.')
+            return (f'Ghi nhận {qty} × {service.name} ({service.price:,.0f}đ/đơn vị) cho {booking.code}?',
+                    {'_tool': tool, 'code': booking.code, 'service_id': service.id, 'quantity': qty})
+        raise ValueError('Thao tác chưa được hỗ trợ.')
+
+    def _chat_execute_mutation(self, tool, args, role, user_id):
+        with self._session() as db:
+            new_role, new_id = self._chat_identity(db)
+            if (new_role, new_id) != (role, user_id):
+                raise PermissionError('Phiên đăng nhập đã thay đổi.')
+            booking = db.scalar(select(Booking).where(
+                Booking.code == str(args['code']).upper()).with_for_update())
+            if not booking:
+                raise ValueError('Đơn đặt phòng không tồn tại.')
+            if tool == 'booking_change_dates':
+                from datetime import date
+                from hotel.models.entities import Room
+                start, end = date.fromisoformat(args['checkin']), date.fromisoformat(args['checkout'])
+                business.dates_in_order(start, end)
+                if role == 'customer' and not db.scalar(select(Customer.id).where(
+                        Customer.id == booking.customer_id, Customer.user_id == user_id)):
+                    raise PermissionError('Không thể đổi ngày cho đơn của tài khoản khác.')
+                if role not in ('customer','receptionist','admin') or booking.status != 'pending' or booking.invoice is not None:
+                    raise ValueError('Chỉ đổi ngày đơn chờ, chưa lập hóa đơn.')
+                if db.get(BookingPromotion, booking.id) or db.scalar(select(ServiceOrder.id).where(
+                        ServiceOrder.booking_id == booking.id, ServiceOrder.status.in_(('pending','confirmed')))):
+                    raise ValueError('Đơn có khuyến mãi hoặc dịch vụ đang xử lý; không đổi lịch qua chatbot.')
+                db.scalar(select(Room).where(Room.id == booking.room_id).with_for_update())
+                if db.scalar(business.conflicting_query(booking.room_id, start, end).where(
+                        Booking.id != booking.id)) is not None:
+                    raise ValueError('Phòng không còn trống trong khoảng ngày mới.')
+                booking.checkin_date, booking.checkout_date = start, end
+                business.log_event(db, user_id, 'booking.reschedule', booking.code)
+                db.commit()
+                return f'Đã đổi lịch {booking.code} thành {start:%d/%m/%Y}–{end:%d/%m/%Y}.', None
+            if tool == 'customer_cancel':
+                if role != 'customer' or not db.scalar(select(Customer.id).where(
+                        Customer.id == booking.customer_id, Customer.user_id == user_id)):
+                    raise PermissionError('Bạn chỉ được hủy đơn thuộc tài khoản của mình.')
+                if booking.status != 'pending' or booking.invoice is not None:
+                    raise ValueError('Đơn không còn đủ điều kiện tự hủy.')
+                if db.get(BookingPromotion, booking.id) or db.scalar(select(ServiceOrder.id).where(
+                        ServiceOrder.booking_id == booking.id, ServiceOrder.status.in_(('pending','confirmed')))):
+                    raise ValueError('Đơn có khuyến mãi/dịch vụ, cần lễ tân hỗ trợ hủy.')
+                business.change_booking_status(db, booking, 'cancelled', user_id)
+                return f'Đã hủy đơn {booking.code}.', None
+            if role not in ('admin','receptionist'):
+                raise PermissionError('Chỉ nhân viên được thực hiện thao tác này.')
+            if tool == 'staff_status':
+                business.change_booking_status(db, booking, args['status'], user_id)
+                return f'Đã cập nhật {booking.code} → {args["status"]}.', None
+            if tool == 'staff_add_service':
+                service = db.get(HotelService, int(args['service_id']))
+                if service is None:
+                    raise ValueError('Không tồn tại dịch vụ.')
+                business.add_service_usage(db, booking, service, int(args['quantity']), user_id)
+                return f'Đã thêm dịch vụ {service.name} vào {booking.code}.', None
+            raise ValueError('Lệnh không hợp lệ.')
+
+    def chat_export_revenue_pdf(self, date_from, date_to, output_path):
+        """Admin only; reuse the existing official PDF report generator."""
+        from datetime import date
+        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+        if start > end or (end - start).days > 366:
+            raise ValueError('Khoảng thống kê phải hợp lệ và tối đa 366 ngày.')
+        with self._session() as db:
+            role, user_id = self._chat_identity(db)
+            if role != 'admin':
+                raise PermissionError('Chỉ Admin được xuất báo cáo doanh thu.')
+            payments, total = business.revenue_summary(db, start, end)
+            content = pdf_service.report_pdf(start, end, payments, total)
+        destination = Path(output_path).expanduser().resolve()
+        if destination.suffix.lower() != '.pdf':
+            raise ValueError('Vui lòng chọn đường dẫn tệp PDF.')
+        destination.write_bytes(content)
+        return {'reply': f'Đã xuất báo cáo doanh thu: {destination}', 'confirmation': None}
+
     def chat_confirm(self, session_id, token, otp=None):
-        # Atomically consume the one-time authorisation before calling the existing
-        # N2 booking workflow; a repeated click cannot create a second booking.
+        # The token is a one-time authorization, scoped to a live user session.
         with self._session() as db:
             role, user_id = self._chat_identity(db)
             session = self._chat_session(db, session_id, role, user_id)
             call = db.scalar(select(ChatToolCall).where(
                 ChatToolCall.session_id == session.id,
-                ChatToolCall.idempotency_key == str(token),
-                ChatToolCall.tool_name == 'create_booking').with_for_update())
+                ChatToolCall.idempotency_key == str(token)).with_for_update())
             if not call or call.status != 'awaiting_confirmation':
-                raise ValueError('Yêu cầu này đã được xử lý hoặc không còn hiệu lực.')
+                raise ValueError('Yêu cầu đã được xử lý hoặc không còn hiệu lực.')
             if utc_now() - call.created_at > timedelta(minutes=15):
                 call.status = 'cancelled'
                 db.commit()
-                raise ValueError('Yêu cầu quá 15 phút. Vui lòng tìm phòng và đặt lại.')
+                raise ValueError('Yêu cầu đã quá 15 phút, hãy thao tác lại.')
+            if role == 'guest' or not user_id:
+                raise PermissionError('Phải đăng nhập mới được thực hiện yêu cầu.')
+            tool = call.tool_name
             values = _as_json(call.arguments_json)
-            if role == 'guest' or user_id is None:
-                raise PermissionError('Bạn phải đăng nhập mới được tạo đặt phòng qua chat.')
-            if role == 'customer':
-                # Never accept contact details from a guest draft or model.
+            if tool not in ('create_booking','customer_cancel','staff_status','staff_add_service','booking_change_dates'):
+                raise PermissionError('Loại thao tác chưa được hỗ trợ.')
+            if tool == 'create_booking' and role not in ('customer','receptionist','admin'):
+                raise PermissionError('Vai trò không hợp lệ để đặt phòng.')
+            if tool == 'create_booking' and role == 'customer':
                 values.pop('customer_id', None)
-                values['name'] = ''
-                values['phone'] = ''
-                values['email'] = ''
+                values.update({'name':'', 'phone':'', 'email':''})
                 values.pop('guest_otp', None)
+            # Single-flight: commit processing status before separate booking transaction.
             call.status = 'processing'
             call.confirmed_by_user = True
             db.commit()
-        # Important: the booking implementation owns room locks and commits.
         try:
-            code = self.book(values)
-            result = f'✅ Đã tạo đặt phòng {code} thành công. Vui lòng xem trạng thái đặt phòng để biết bước tiếp theo.'
+            if tool == 'create_booking':
+                # Persist a unique reference in Booking.notes so a crash after
+                # business commit can be reconciled without issuing a second booking.
+                reference = 'N5REF:' + str(token)
+                values['notes'] = (str(values.get('notes',''))[:850] + '\n' + reference).strip()
+                with self._session() as db:
+                    already = db.scalar(select(Booking.code).where(Booking.notes.like('%' + reference + '%')))
+                if already:
+                    result = f'Đơn {already} đã được tạo trước đó; không tạo trùng.'
+                else:
+                    code = self.book(values)
+                    result = f'✅ Đã tạo đặt phòng {code} thành công. Hãy kiểm tra trạng thái đơn.'
+            else:
+                result, _ = self._chat_execute_mutation(tool, values, role, user_id)
             status = 'completed'
-        except (ValueError, PermissionError) as exc:
-            result = f'Không thể tạo đặt phòng: {exc}. Hãy kiểm tra lại thông tin và lập yêu cầu mới.'
-            status = 'failed'
+        except Exception as exc:
+            # Business may have committed before a network/GUI exception.
+            # Check the one-time booking reference before reporting failure.
+            already = None
+            if tool == 'create_booking':
+                try:
+                    with self._session() as db:
+                        already = db.scalar(select(Booking.code).where(
+                            Booking.notes.like('%N5REF:' + str(token) + '%')))
+                except Exception:
+                    pass
+            if already:
+                result = f'✅ Đặt phòng {already} đã được lưu; không tạo trùng.'
+                status = 'completed'
+            else:
+                result = 'Không thể hoàn tất yêu cầu: ' + str(exc)
+                status = 'failed'
         with self._session() as db:
             role2, uid2 = self._chat_identity(db)
             session = self._chat_session(db, session_id, role2, uid2)
-            call = db.scalar(select(ChatToolCall).where(ChatToolCall.session_id == session.id,
+            call = db.scalar(select(ChatToolCall).where(
+                ChatToolCall.session_id == session.id,
                 ChatToolCall.idempotency_key == str(token)))
             if call:
                 call.status, call.result_text = status, result
@@ -313,7 +496,7 @@ class ChatControllerMixin:
             if not call or call.status != 'awaiting_confirmation':
                 raise ValueError('Yêu cầu đã hết hiệu lực.')
             call.status = 'cancelled'
-            reply_text = 'Đã hủy yêu cầu tạo đặt phòng. Chưa có đơn nào được ghi từ yêu cầu này.'
+            reply_text = 'Đã hủy yêu cầu xác nhận. Chưa thực hiện thao tác ghi dữ liệu từ yêu cầu này.'
             db.add(ChatMessage(session_id=session.id, sender='assistant', content=reply_text))
             db.commit()
             return {'session_id': session_id, 'reply': reply_text, 'confirmation': None}

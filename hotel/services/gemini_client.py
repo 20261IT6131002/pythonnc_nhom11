@@ -19,6 +19,7 @@ ACTIONS = (
     'booking_prepare', 'booking_lookup', 'my_bookings', 'invoice_lookup',
     'staff_booking_lookup', 'arrivals', 'departures', 'pending_bookings',
     'customer_search', 'revenue', 'occupancy', 'popular_rooms', 'top_services',
+    'revenue_compare', 'revenue_trend',
 )
 ROLE_ACTIONS = {
     'guest': {'reply', 'hotel_info', 'room_prices', 'service_list', 'room_search', 'booking_quote', 'booking_prepare'},
@@ -54,7 +55,7 @@ def _normalise_plan(plan: dict, role: str) -> dict:
     args = args if isinstance(args, dict) else {}
     clean_args = {str(k): str(v)[:160] for k, v in args.items()
                   if k in {'checkin','checkout','guests','room_id','room_type','code','invoice_id',
-                           'date_from','date_to','name','phone','email','limit','notes'}}
+                           'date_from','date_to','months','name','phone','email','limit','notes'}}
     return {'action': action, 'args': clean_args, 'reply': str(plan.get('reply', ''))[:1200]}
 
 
@@ -79,7 +80,7 @@ def plan_message(role: str, message: str, history: list[tuple[str, str]], contex
         'nếu phòng đã xuất hiện trong ngữ cảnh thì dùng lại checkin, checkout, guests; '
         'booking_lookup/my_bookings/invoice_lookup là tra cứu của khách đã xác thực; '
         'staff_booking_lookup/arrivals/departures/pending_bookings/customer_search là tra cứu lễ tân; '
-        'revenue/occupancy/popular_rooms/top_services dùng cho Admin. '
+        'revenue/occupancy/popular_rooms/top_services/revenue_compare/revenue_trend dùng cho Admin. '
         'Ngày hôm nay: ' + date.today().isoformat() + '. '
         'Tham số ngày đặt phòng dùng YYYY-MM-DD; ngày báo cáo dùng date_from/date_to; '
         'số khách dùng guests; định danh phòng dùng room_id; mã đặt phòng dùng code. '
@@ -158,6 +159,8 @@ def fallback_plan(role: str, message: str, history=None, context=None) -> dict:
     dates = iso + [f'{y}-{int(m):02d}-{int(d):02d}' for d,m,y in vn]
     if len(dates) >= 2:
         args['checkin'], args['checkout'] = dates[:2]
+        if role == 'admin':
+            args['date_from'], args['date_to'] = dates[:2]
     elif 'ngay mai' in q or 'hom nay' in q or 'ngay kia' in q:
         delta = 1 if 'ngay mai' in q else (2 if 'ngay kia' in q else 0)
         start = date.today() + timedelta(days=delta)
@@ -197,6 +200,10 @@ def fallback_plan(role: str, message: str, history=None, context=None) -> dict:
         action = 'booking_quote'
     elif any(w in q for w in ('tim phong', 'phong trong', 'con phong', 'muon phong', 'phong cho')) or ('checkin' in args and 'checkout' in args):
         action = 'room_search'
+    elif role == 'admin' and any(w in q for w in ('xu huong doanh thu','doanh thu tung thang','doanh thu hang thang')):
+        action = 'revenue_trend'
+    elif role == 'admin' and ('so sanh' in q and any(w in q for w in ('doanh thu', 'tien thu'))):
+        action = 'revenue_compare'
     elif role == 'admin' and any(w in q for w in ('doanh thu', 'tien thu')):
         action = 'revenue'
     elif role in ('admin', 'receptionist') and any(w in q for w in ('nhan phong hom nay', 'khach den hom nay', 'check-in hom nay')):
