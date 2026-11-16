@@ -21,6 +21,7 @@ class LoginView(tk.Frame):
         self.c, self.app = controller, app
         self.mode = 'login'
         self.fields = {}
+        self.pending_registration = None  # Only in memory while verifying OTP.
 
         header = tk.Frame(self, bg=WHITE, height=78,
                           highlightbackground=EDGE, highlightthickness=1)
@@ -158,6 +159,8 @@ class LoginView(tk.Frame):
             self._bind_form_scroll(child)
 
     def _switch(self, mode):
+        if mode not in ('register', 'register_otp'):
+            self.pending_registration = None
         self.mode = mode
         self._render()
 
@@ -186,10 +189,24 @@ class LoginView(tk.Frame):
             self._field('email', 'Email của bạn')
             self._field('password', 'Mật khẩu (ít nhất 8 ký tự)', secret=True)
             self._field('confirmation', 'Nhập lại mật khẩu', secret=True)
-            self._field('otp', 'Mã OTP 6 chữ số')
-            self._button('Gửi mã OTP đến email', self._send_registration_otp, False)
-            self._button('Xác minh và tạo tài khoản  →', self._register)
+            self._button('Tiếp tục • Gửi mã xác minh  →', self._send_registration_otp)
             self._link('Đã có tài khoản? Đăng nhập', 'login')
+        elif self.mode == 'register_otp':
+            if not self.pending_registration:
+                self.mode = 'register'
+                self._render()
+                return
+            self._heading('Bước 2/2 • Xác thực email', 'Kiểm tra hộp thư',
+                          'Nhập mã OTP gồm 6 chữ số vừa được gửi đến email của bạn.')
+            address = self.pending_registration['email']
+            self._label(self.panel, address, 11, DEEP_BLUE, WHITE, 'bold',
+                        wraplength=390).pack(anchor='w', pady=(0, 14))
+            field = self._field('otp', 'Mã xác minh (hiệu lực 10 phút)')
+            self._button('Xác nhận OTP và tạo tài khoản  →', self._register)
+            self._button('Gửi lại mã OTP', self._resend_registration_otp, False)
+            self._link('← Chỉnh sửa thông tin đăng ký', 'register')
+            self._link('Đã có tài khoản? Đăng nhập', 'login')
+            field.bind('<Return>', lambda _event: self._register())
         else:
             self._heading('Khôi phục bảo mật', 'Quên mật khẩu?',
                           'Nhập email đã xác minh. Mã OTP có hiệu lực trong 10 phút.')
@@ -240,20 +257,47 @@ class LoginView(tk.Frame):
 
     def _send_registration_otp(self):
         try:
-            self.c.request_registration_otp(self._value('email'))
-            messagebox.showinfo('GrandStay', 'Đã gửi OTP. Kiểm tra hộp thư và cả mục Spam.',
+            data = {key: self._value(key) for key in
+                    ('username', 'name', 'email', 'password', 'confirmation', 'phone')}
+            self.c.request_registration_otp(
+                data['email'], data['username'], data['name'],
+                data['password'], data['confirmation'], data['phone'])
+            self.pending_registration = data
+            self._switch('register_otp')
+            messagebox.showinfo('GrandStay',
+                                'Đã gửi mã xác minh. Kiểm tra Hộp thư đến hoặc Spam.',
+                                parent=self.winfo_toplevel())
+        except Exception as exc:
+            error(self, exc)
+
+    def _resend_registration_otp(self):
+        try:
+            if not self.pending_registration:
+                raise ValueError('Vui lòng nhập lại thông tin đăng ký.')
+            data = self.pending_registration
+            self.c.request_registration_otp(
+                data['email'], data['username'], data['name'],
+                data['password'], data['confirmation'], data['phone'])
+            messagebox.showinfo('GrandStay', 'Đã gửi mã mới. Mã cũ sẽ không còn hiệu lực.',
                                 parent=self.winfo_toplevel())
         except Exception as exc:
             error(self, exc)
 
     def _register(self):
         try:
-            self.c.register_customer(self._value('username'), self._value('name'),
-                                     self._value('email'), self._value('password'),
-                                     self._value('confirmation'), self._value('otp'),
-                                     self._value('phone'))
-            self.c.login(self._value('email'), self._value('password'))
-            self.app.show_customer()
+            if not self.pending_registration:
+                raise ValueError('Vui lòng điền thông tin đăng ký trước.')
+            data = self.pending_registration
+            self.c.register_customer(data['username'], data['name'],
+                                     data['email'], data['password'],
+                                     data['confirmation'], self._value('otp'),
+                                     data['phone'])
+            user = self.c.login(data['email'], data['password'])
+            self.pending_registration = None
+            if user['role'] == 'customer':
+                self.app.show_customer()
+            else:
+                self.app.show_staff()
         except Exception as exc:
             error(self, exc)
 

@@ -16,9 +16,11 @@ class AuthControllerMixin:
             self.user = auth.authenticate(db, username, password)
             return dict(self.user)
 
-    def request_registration_otp(self, email):
+    def request_registration_otp(self, email, username=None, name=None,
+                                 password=None, confirmation=None, phone=None):
         with self._session() as db:
-            auth.request_registration_otp(db, email)
+            auth.request_registration_otp(db, email, username, name,
+                                          password, confirmation, phone)
 
     def register_customer(self, username, name, email, password, confirmation, otp, phone):
         with self._session() as db:

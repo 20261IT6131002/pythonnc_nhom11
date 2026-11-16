@@ -74,27 +74,40 @@ def _create_account(db, *, username, full_name, password, role, actor_id=None,
     return new_user
 
 
-def request_registration_otp(db, email):
+def validate_registration(db, username, full_name, email, password, confirmation, phone):
+    """Validate fields and duplicates before sending a registration OTP."""
+    username = normalize_username(username)
+    full_name = str(full_name).strip()
+    if not 2 <= len(full_name) <= 120:
+        raise ValueError('Họ tên phải dài từ 2 đến 120 ký tự.')
     email = email_otp.normalize_email(email)
-    if db.scalar(select(User.id).where(User.email == email)) is not None:
+    phone = normalize_phone(phone)
+    if password != confirmation:
+        raise ValueError('Mật khẩu xác nhận không khớp.')
+    validate_password(password)
+    if db.scalar(select(User.id).where(func.lower(User.username) == username.lower())) is not None:
+        raise ValueError('Tên đăng nhập đã tồn tại.')
+    if db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
+        raise ValueError('Email đã được đăng ký.')
+    if db.scalar(select(User.id).where(User.phone == phone)) is not None:
+        raise ValueError('Số điện thoại đã được dùng cho tài khoản khác.')
+    return username, full_name, email, phone
+
+
+def request_registration_otp(db, email, username=None, full_name=None,
+                             password=None, confirmation=None, phone=None):
+    email = email_otp.normalize_email(email)
+    if username is not None:
+        validate_registration(db, username, full_name, email, password,
+                              confirmation, phone)
+    elif db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
         raise ValueError('Email đã được đăng ký.')
     email_otp.issue_otp(db, email, 'register')
 
 
 def register_customer(db, username, full_name, email, password, confirmation, otp, phone):
-    if password != confirmation:
-        raise ValueError('Mật khẩu xác nhận không khớp.')
-    username = normalize_username(username)
-    email = email_otp.normalize_email(email)
-    phone = normalize_phone(phone)
-    if db.scalar(select(User.id).where(User.username == username)) is not None:
-        raise ValueError('Tên đăng nhập đã tồn tại.')
-    if db.scalar(select(User.id).where(User.email == email)) is not None:
-        raise ValueError('Email đã được đăng ký.')
-    if db.scalar(select(User.id).where(User.phone == phone)) is not None:
-        raise ValueError('Số điện thoại đã được dùng cho tài khoản khác.')
-    # Validate password before consuming the one-time code.
-    validate_password(password)
+    username, full_name, email, phone = validate_registration(
+        db, username, full_name, email, password, confirmation, phone)
     email_otp.consume_otp(db, email, 'register', otp)
     return _create_account(db, username=username, full_name=full_name,
                            password=password, role='customer', email=email,
