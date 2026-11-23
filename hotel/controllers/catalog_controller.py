@@ -1,8 +1,11 @@
 from __future__ import annotations
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from sqlalchemy import select
-from hotel.models.entities import (AuditLog, Booking, Customer, HotelService, Invoice, Room, RoomType, User)
+from hotel.models.entities import (AuditLog, Booking, BookingDeposit, Customer,
+                                   HotelService, Invoice, Payment, Refund, Room,
+                                   RoomType, User)
 from hotel.repositories.catalog import HotelRepository
 from hotel.services import business, catalog, chatbot, pdf_service
 from hotel.services.security import verify_password
@@ -57,23 +60,59 @@ class CatalogControllerMixin:
                          'linked': 'Đã liên kết' if x.user_id else 'Khách tại quầy'}
                         for x in repo.customers()]
             if kind == 'bookings':
-                return [{'id': x.id, 'code': x.code, 'customer': x.customer.full_name,
-                         'phone': x.customer.phone, 'customer_id': x.customer_id,
-                         'room': x.room.number,
-                         'checkin': str(x.checkin_date), 'checkout': str(x.checkout_date),
-                         'guests': x.guests, 'status': x.status,
-                         'estimate': vnd(x.nightly_price * (x.checkout_date - x.checkin_date).days)}
-                        for x in repo.bookings()]
+                rows = []
+                for x in repo.bookings():
+                    dep = sum((d.amount for d in x.deposits if d.status in ('paid', 'applied')), Decimal('0')) if getattr(x, 'deposits', None) else Decimal('0')
+                    deposit_label = f"Đã cọc {vnd(dep)}" if dep > 0 else "Chưa cọc"
+                    rows.append({
+                        'id': x.id, 'code': x.code, 'customer': x.customer.full_name,
+                        'phone': x.customer.phone, 'customer_id': x.customer_id,
+                        'room': x.room.number,
+                        'checkin': str(x.checkin_date), 'checkout': str(x.checkout_date),
+                        'guests': x.guests, 'status': x.status,
+                        'deposit': deposit_label,
+                        'estimate': vnd(x.nightly_price * (x.checkout_date - x.checkin_date).days)
+                    })
+                return rows
             if kind == 'services':
                 return [{'id': x.id, 'name': x.name, 'price': str(x.price),
                          'active': x.active} for x in repo.services()]
             if kind == 'invoices':
                 snapshots = {row.invoice_id: row for row in db.scalars(select(InvoiceCustomerSnapshot)).all()}
-                return [{'id': x.id, 'code': x.booking.code,
-                         'customer': (snapshots[x.id].full_name if x.id in snapshots else x.booking.customer.full_name),
-                         'room': vnd(x.room_amount), 'services': vnd(x.services_amount),
-                         'total': vnd(x.total_amount), 'paid': vnd(x.total_amount - business.invoice_due(x)),
-                         'due': vnd(business.invoice_due(x))} for x in repo.invoices()]
+                rows = []
+                for x in repo.invoices():
+                    b = x.booking
+                    due = business.invoice_due(x)
+                    dep_total = sum((d.amount for d in b.deposits if d.status in ('paid', 'applied')), Decimal('0')) if b and getattr(b, 'deposits', None) else Decimal('0')
+                    paid_total = x.total_amount - due
+                    status = 'Đã thanh toán đủ' if due == 0 else f'Còn thiếu {vnd(due)}'
+                    rows.append({
+                        'id': x.id, 'code': b.code if b else '-',
+                        'customer': (snapshots[x.id].full_name if x.id in snapshots else (b.customer.full_name if b and b.customer else '-')),
+                        'room': vnd(x.room_amount), 'services': vnd(x.services_amount),
+                        'discount': vnd(x.discount_amount),
+                        'deposit': vnd(dep_total),
+                        'total': vnd(x.total_amount), 'paid': vnd(paid_total),
+                        'due': vnd(due), 'status': status
+                    })
+                return rows
+            if kind == 'deposits':
+                deposits = db.scalars(select(BookingDeposit).order_by(BookingDeposit.id.desc())).all()
+                return [{'id': d.id, 'code': d.booking.code if d.booking else '-',
+                         'customer': d.booking.customer.full_name if d.booking and d.booking.customer else '-',
+                         'room': d.booking.room.number if d.booking and d.booking.room else '-',
+                         'amount': vnd(d.amount), 'method': d.method, 'reference': d.reference,
+                         'status': 'Đã nhận' if d.status == 'paid' else 'Đã cấn trừ' if d.status == 'applied' else 'Đã hoàn cọc' if d.status == 'refunded' else d.status,
+                         'date': d.created_at.strftime('%Y-%m-%d %H:%M')}
+                        for d in deposits]
+            if kind == 'refunds':
+                refunds = db.scalars(select(Refund).order_by(Refund.id.desc())).all()
+                return [{'id': r.id, 'code': r.booking.code if r.booking else '-',
+                         'customer': r.booking.customer.full_name if r.booking and r.booking.customer else '-',
+                         'amount': vnd(r.amount), 'method': r.method, 'reason': r.reason,
+                         'status': 'Đã hoàn tất' if r.status == 'completed' else r.status,
+                         'date': r.created_at.strftime('%Y-%m-%d %H:%M')}
+                        for r in refunds]
             if kind == 'users':
                 users = repo.users()
                 employees = {x.user_id: x for x in db.scalars(select(Employee)).all()}

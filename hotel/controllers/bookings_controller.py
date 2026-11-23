@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from sqlalchemy import select
 from hotel.models.entities import (AuditLog, Booking, Customer, HotelService, Invoice, Room, RoomType, User)
@@ -63,9 +64,21 @@ class BookingsControllerMixin:
             booking = db.scalar(select(Booking).where(Booking.code == str(code).strip().upper()))
             if not booking or booking.customer.phone != str(phone).strip():
                 raise ValueError('Không tìm thấy đơn đúng mã và số điện thoại.')
-            return {'code': booking.code, 'room': booking.room.number,
-                    'checkin': str(booking.checkin_date), 'checkout': str(booking.checkout_date),
-                    'status': booking.status, 'customer': booking.customer.full_name}
+            dep_total = sum((d.amount for d in booking.deposits if d.status in ('paid', 'applied')), Decimal('0')) if getattr(booking, 'deposits', None) else Decimal('0')
+            has_inv = booking.invoice is not None
+            inv_due = business.invoice_due(booking.invoice) if has_inv else None
+            return {
+                'id': booking.id,
+                'code': booking.code, 'room': booking.room.number,
+                'checkin': str(booking.checkin_date), 'checkout': str(booking.checkout_date),
+                'status': booking.status, 'customer': booking.customer.full_name,
+                'deposit': vnd(dep_total),
+                'has_invoice': has_inv,
+                'invoice_id': booking.invoice.id if has_inv else None,
+                'total_amount': vnd(booking.invoice.total_amount) if has_inv else None,
+                'due': vnd(inv_due) if has_inv else None,
+                'payment_status': ('Đã thanh toán đủ' if inv_due == 0 else f'Còn thiếu {vnd(inv_due)}') if has_inv else ('Đã đặt cọc' if dep_total > 0 else 'Chưa thanh toán')
+            }
 
     def set_booking_status(self, booking_id, status):
         with self._session() as db:

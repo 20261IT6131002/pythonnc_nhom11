@@ -101,8 +101,11 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 | Lễ tân | Xác nhận → nhận phòng → lập hóa đơn/thanh toán → trả phòng, hoặc hủy hợp lệ |
 | Lịch phòng | Xem 7/14/30 ngày, từng phòng, các ngày đã đặt/đang ở |
 | Dịch vụ | Quản lý giá và trạng thái dịch vụ, thêm phát sinh khi khách đã check-in |
-| Hóa đơn | Chốt tiền phòng/dịch vụ, ghi nhận tiền mặt/chuyển khoản/thẻ thủ công, chống thu vượt, xuất PDF |
-| Báo cáo | Số tiền thực thu theo khoảng ngày, xuất PDF (Admin) |
+| Tài chính & Đặt cọc N4 | Thu cọc trước khi check-in, tự động chuyển đơn sang confirmed, xuất phiếu thu cọc PDF, tự động cấn trừ cọc vào hóa đơn tổng |
+| Hoàn tiền N4 | Gợi ý số tiền hoàn hủy theo chính sách ngày hủy (≥3 ngày: 100%, 1-2 ngày: 50%), ghi nhận hoàn tiền vào DB và sổ quỹ, xuất phiếu chi PDF |
+| Hóa đơn & Thanh toán N4 | Chốt tiền phòng/dịch vụ/khuyến mãi, cấn trừ cọc, thanh toán nhiều đợt, chống thu vượt, xem chi tiết cơ cấu thu chi, xuất PDF |
+| Báo cáo tài chính N4 | Báo cáo tài chính toàn diện (KPI Gross, Net, Deposits, Refunds, Due), cơ cấu theo loại phòng & phương thức thanh toán, xuất PDF chi tiết |
+| Email tài chính N4 | Tự động gửi email hóa đơn PDF, email xác nhận cọc PDF, email thông báo hoàn tiền PDF, biên nhận thanh toán qua SMTP |
 | Tư vấn | Chatbot **quy tắc** đọc giá, dịch vụ, phòng còn trống từ MySQL |
 | Khách hàng | Tự tìm, gửi yêu cầu đặt phòng, tra cứu bằng mã BK + SĐT |
 

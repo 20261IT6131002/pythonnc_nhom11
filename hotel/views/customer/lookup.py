@@ -30,12 +30,27 @@ class CustomerLookupMixin:
                 booking = self.c.lookup(code_var.get(), phone_var.get())
                 for child in result.winfo_children():
                     child.destroy()
-                lines = [f"Mã đơn: {booking['code']}", f"Khách: {booking['customer']}",
+                lines = [f"Mã đơn: {booking['code']}", f"Khách hàng: {booking['customer']}",
                          f"Phòng: {booking['room']}",
-                         f"Nhận / Trả: {booking['checkin']} → {booking['checkout']}",
-                         f"Trạng thái: {booking['status']}"]
+                         f"Thời gian: {booking['checkin']} → {booking['checkout']}",
+                         f"Trạng thái đơn: {booking['status']}",
+                         f"Tiền đặt cọc: {booking['deposit']}",
+                         f"Thanh toán: {booking['payment_status']}"]
+                if booking.get('has_invoice'):
+                    lines.append(f"Tổng hóa đơn: {booking['total_amount']}")
                 for line in lines:
-                    text(result, line, 11, NAVY, WHITE).pack(anchor='w', pady=5)
+                    text(result, line, 11, NAVY, WHITE).pack(anchor='w', pady=4)
+
+                if booking.get('has_invoice'):
+                    def download_invoice():
+                        path = filedialog.asksaveasfilename(
+                            parent=self, defaultextension='.pdf',
+                            initialfile=f"hoa_don_{booking['code']}.pdf",
+                            filetypes=[('PDF', '*.pdf')])
+                        if path:
+                            self.c.export_invoice(booking['invoice_id'], path)
+                            success(self, 'Đã tải hóa đơn PDF:\n' + path)
+                    solid_button(result, 'Tải hóa đơn PDF ↗', download_invoice, light=True).pack(anchor='w', pady=(10, 0))
             except Exception as exc:
                 error(self, exc)
 

@@ -26,3 +26,5 @@ class Booking(Base):
     room: Mapped['Room'] = relationship()
     usages: Mapped[list['ServiceUsage']] = relationship(back_populates='booking')
     invoice: Mapped['Invoice | None'] = relationship(back_populates='booking', uselist=False)
+    deposits: Mapped[list['BookingDeposit']] = relationship('BookingDeposit', back_populates='booking')
+    refunds: Mapped[list['Refund']] = relationship('Refund', back_populates='booking')
