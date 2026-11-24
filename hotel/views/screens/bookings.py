@@ -41,11 +41,13 @@ class BookingsScreenMixin:
 
     def _status(self):
         row = self._chosen()
-        statuses = ['confirmed', 'checked_in', 'checked_out', 'cancelled']
+        statuses = (['cancelled'] if row['status'] == 'expired' else
+                    ['confirmed', 'checked_in', 'checked_out', 'cancelled'])
+        current_status = 'hết hạn' if row['status'] == 'expired' else row['status']
         values = form_dialog(self, 'Chuyển trạng thái đặt phòng',
-            [('status', f"Đơn {row['code']} đang {row['status']}", statuses[0], statuses)])
+            [('status', f"Đơn {row['code']} đang {current_status}", statuses[0], statuses)])
         if values is not None:
-            self.c.set_booking_status(row['id'], values['status'])
+            self.c.set_booking_status(row['id'], values['status'], enforce_schedule=True)
             self._done(f"Đơn {row['code']} đã chuyển sang {values['status']}.")
 
     def _usage(self):

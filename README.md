@@ -97,8 +97,8 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 | Tổng quan | Số phòng, khách, đơn đặt, khách đang lưu trú, tiền thu trong ngày |
 | Phòng và loại phòng | Thêm/sửa loại phòng, giá, sức chứa; thêm/sửa/tạm ngừng phòng |
 | Khách hàng | Thêm/sửa thông tin, xem lịch sử đặt phòng theo SĐT |
-| Đặt phòng | Tìm phòng trống theo ngày & số khách, kiểm tra trùng khoảng ngày, mã BK, đơn khách chờ xác nhận |
-| Lễ tân | Xác nhận → nhận phòng → lập hóa đơn/thanh toán → trả phòng, hoặc hủy hợp lệ |
+| Đặt phòng | Tìm phòng trống theo ngày & số khách, kiểm tra trùng khoảng ngày, mã BK; yêu cầu online chờ tối đa 15 phút |
+| Lễ tân | Xác nhận → nhận phòng từ ngày đặt và sau giờ nhận cấu hình → lập hóa đơn/thanh toán → trả phòng từ ngày trả; cho phép trả trễ và lưu thời điểm thực tế |
 | Lịch phòng | Xem 7/14/30 ngày, từng phòng, các ngày đã đặt/đang ở |
 | Dịch vụ | Quản lý giá và trạng thái dịch vụ, thêm phát sinh khi khách đã check-in |
 | Hóa đơn | Chốt tiền phòng/dịch vụ, ghi nhận tiền mặt/chuyển khoản/thẻ thủ công, chống thu vượt, xuất PDF |
@@ -106,7 +106,7 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 | Tư vấn | Chatbot **quy tắc** đọc giá, dịch vụ, phòng còn trống từ MySQL |
 | Khách hàng | Tự tìm, gửi yêu cầu đặt phòng, tra cứu bằng mã BK + SĐT |
 
-**Quy định nghiệp vụ:** ngày nhận trước ngày trả; không đặt ngày quá khứ; cấm trùng lịch phòng ở các trạng thái hiệu lực; giá phòng được chốt khi đặt; chỉ thêm dịch vụ trong thời gian đã nhận phòng và trước lúc chốt hóa đơn; không trả phòng nếu hóa đơn còn thiếu tiền.
+**Quy định nghiệp vụ:** ngày nhận trước ngày trả; không đặt ngày quá khứ; yêu cầu giữ phòng online hết hạn sau 15 phút nếu chưa được xác nhận; cấm trùng lịch phòng ở các trạng thái hiệu lực; giá phòng được chốt khi đặt; check-in từ ngày nhận đã đặt và sau giờ nhận cấu hình; check-out không trước ngày trả đã đặt (trả trễ vẫn được ghi nhận); chỉ thêm dịch vụ trong thời gian đã nhận phòng và trước lúc chốt hóa đơn; không trả phòng nếu hóa đơn còn thiếu tiền.
 
 ## Kiểm thử
 

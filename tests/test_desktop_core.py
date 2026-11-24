@@ -1,7 +1,7 @@
 """Pure controller/service tests on throwaway SQLite; NEVER touch live MySQL."""
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 os.environ['GRANDSTAY_TEST_MODE'] = '1'
@@ -14,7 +14,8 @@ from sqlalchemy.pool import StaticPool
 
 from hotel.controllers.desktop_controller import DesktopController
 from hotel.models.database import Base
-from hotel.models.entities import Booking, HotelService, Room, RoomType, User
+from hotel.models.entities import Booking, HotelService, Room, RoomType, SystemSetting, User
+from hotel.services import business
 from hotel.services.security import hash_password
 
 
@@ -98,6 +99,63 @@ def test_staff_lifecycle_payment_pdf_and_calendar(hotel, tmp_path):
     target = tmp_path / 'invoice.pdf'
     c.export_invoice(invoice_id, target)
     assert target.read_bytes().startswith(b'%PDF')
+
+def test_pending_booking_hold_expires_and_releases_room(hotel):
+    c, factory = hotel
+    value = request()
+    with factory() as db:
+        booking = business.create_booking(
+            db, name=value['name'], phone=value['phone'], email=value['email'],
+            room_id=value['room_id'], checkin=date.fromisoformat(value['checkin']),
+            checkout=date.fromisoformat(value['checkout']), guests=2, status='pending')
+        booking_id = booking.id
+        assert c.available(value['checkin'], value['checkout'], 2) == []
+        booking.created_at = business.utc_now() - timedelta(minutes=16)
+        db.commit()
+
+    assert len(c.available(value['checkin'], value['checkout'], 2)) == 1
+    c.login('admin', 'StrongAdmin123')
+    with pytest.raises(ValueError, match='hết hạn'):
+        c.set_booking_status(booking_id, 'confirmed')
+    row = next(row for row in c.table('bookings') if row['id'] == booking_id)
+    assert row['status'] == 'expired'
+
+    with factory() as db:
+        replacement = business.create_booking(
+            db, name='Khách thay thế', phone='0912345688', email='new@example.com',
+            room_id=value['room_id'], checkin=date.fromisoformat(value['checkin']),
+            checkout=date.fromisoformat(value['checkout']), guests=2, status='pending')
+        assert replacement.id != booking_id
+
+def test_n2_checkin_checkout_schedule_uses_hotel_settings(hotel):
+    _controller, factory = hotel
+    value = request()
+    start = date.fromisoformat(value['checkin'])
+    end = date.fromisoformat(value['checkout'])
+    with factory() as db:
+        db.add_all([
+            SystemSetting(key='checkin_time', value='14:00'),
+            SystemSetting(key='checkout_time', value='12:00'),
+        ])
+        booking = business.create_booking(
+            db, name=value['name'], phone=value['phone'], email=value['email'],
+            room_id=value['room_id'], checkin=start, checkout=end, guests=2,
+            status='confirmed')
+
+        with pytest.raises(ValueError, match='ngày đặt'):
+            business.validate_stay_schedule(
+                db, booking, 'checked_in', datetime.combine(start - timedelta(days=1), time(15)))
+        with pytest.raises(ValueError, match='14:00'):
+            business.validate_stay_schedule(
+                db, booking, 'checked_in', datetime.combine(start, time(13, 59)))
+        assert not business.validate_stay_schedule(
+            db, booking, 'checked_in', datetime.combine(start, time(14)))
+
+        with pytest.raises(ValueError, match='ngày trả'):
+            business.validate_stay_schedule(
+                db, booking, 'checked_out', datetime.combine(end - timedelta(days=1), time(15)))
+        assert business.validate_stay_schedule(
+            db, booking, 'checked_out', datetime.combine(end, time(13)))
 
 
 def test_permissions_and_admin_catalog(hotel):

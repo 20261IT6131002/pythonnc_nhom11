@@ -2,7 +2,7 @@
 from datetime import date
 from sqlalchemy import func, select
 from hotel.models.entities import Booking, Customer, HotelService, Room, RoomType, User
-from hotel.services.business import log_event, money
+from hotel.services.business import active_booking_clause, log_event, money
 from hotel.services.security import hash_password
 
 
@@ -54,7 +54,7 @@ def edit_room(db, actor_id, room, type_id, floor):
         raise ValueError('Loại phòng không tồn tại.')
     if room.room_type_id != type_id:
         occupied = db.scalar(select(Booking.id).where(Booking.room_id == room.id,
-            Booking.status.in_(('pending', 'confirmed', 'checked_in'))).limit(1))
+            active_booking_clause()).limit(1))
         if occupied:
             raise ValueError('Không thể đổi loại phòng khi còn đơn hiệu lực.')
     room.room_type_id = type_id
@@ -66,7 +66,7 @@ def edit_room(db, actor_id, room, type_id, floor):
 def toggle_room(db, actor_id, room):
     if room.active:
         reserved = db.scalar(select(Booking.id).where(Booking.room_id == room.id,
-            Booking.status.in_(('pending', 'confirmed', 'checked_in')),
+            active_booking_clause(),
             Booking.checkout_date > date.today()).limit(1))
         if reserved:
             raise ValueError('Phòng còn lịch đặt hiệu lực, không thể tắt.')
