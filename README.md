@@ -108,6 +108,20 @@ Các lớp View dùng *Mixin* để chia nhỏ phương thức mà vẫn giữ n
 
 **Quy định nghiệp vụ:** ngày nhận trước ngày trả; không đặt ngày quá khứ; yêu cầu giữ phòng online hết hạn sau 15 phút nếu chưa được xác nhận; cấm trùng lịch phòng ở các trạng thái hiệu lực; giá phòng được chốt khi đặt; check-in từ ngày nhận đã đặt và sau giờ nhận cấu hình; check-out không trước ngày trả đã đặt (trả trễ vẫn được ghi nhận); chỉ thêm dịch vụ trong thời gian đã nhận phòng và trước lúc chốt hóa đơn; không trả phòng nếu hóa đơn còn thiếu tiền.
 
+## N3 dịch vụ và chi phí theo đơn
+
+- Vào **Yêu cầu dịch vụ** để lọc theo mã đặt phòng, phòng, khách, SĐT, tên dịch vụ,
+  trạng thái và khoảng ngày tạo. Ngày tạo được hiển thị và lọc theo giờ Việt Nam.
+- Chọn một yêu cầu rồi nhấn **Chi tiết theo đơn**, hoặc chọn đơn trong **Đặt phòng** /
+  **Khách đang lưu trú** rồi nhấn **Dịch vụ & chi phí** để xem bảng kê.
+- Bảng kê tổng hợp dịch vụ phát sinh trực tiếp và yêu cầu dịch vụ. Tổng tạm tính
+  gồm tiền phòng, dịch vụ đã ghi phí và giảm giá. Dịch vụ chờ/đã xác nhận được
+  hiển thị riêng và được ghi phí khi hoàn thành.
+- Khi đơn đã có hóa đơn, bảng kê hiển thị số tiền đã chốt, đã thanh toán và còn
+  phải trả. Khách đăng nhập mở bảng kê của mình từ **Tài khoản** hoặc **Tiện ích**.
+- Đơn giữ phòng hết hạn hiển thị trạng thái **Hết hạn** trong lịch sử khách và
+  bị chặn áp dụng mã khuyến mãi.
+
 ## Kiểm thử
 
 Chạy kiểm thử nghiệp vụ với **SQLite trong bộ nhớ chỉ dành cho test**, hoàn toàn không sử dụng hoặc thay đổi MySQL của bạn:

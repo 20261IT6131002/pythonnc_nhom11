@@ -1,5 +1,5 @@
 """N3 regressions run on disposable SQLite with the existing Controller facade."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from test_desktop_core import hotel, request
 from hotel.models.database import Base
+from hotel.models.common import utc_now
 from hotel.models.entities import (Booking, BookingGuest, BookingPromotion, Customer,
     CustomerProfile, HotelService, Invoice, InvoiceCustomerSnapshot, Promotion, ServiceOrder,
     ServiceUsage, User)
@@ -322,3 +323,142 @@ def test_existing_schema_and_records_survive_additive_table_creation():
         assert db.get(Customer, 1).full_name == 'Historic customer'
         assert db.get(HotelService, 1).price == 12345
     engine.dispose()
+
+
+@pytest.mark.parametrize('already_applied', [False, True])
+def test_expired_booking_cannot_apply_or_reapply_promotion_and_history_agrees(n3, already_applied):
+    c, factory = n3
+    promotion_id = c.save_promotion(promotion())
+    c.login('guest1', 'CustomerPass123')
+    code = c.book(request())
+    booking_id = c.customer_history()[0]['id']
+    if already_applied:
+        c.apply_promotion(booking_id, 'WELCOME10')
+    with factory() as db:
+        db.get(Booking, booking_id).created_at = utc_now() - timedelta(minutes=16)
+        db.commit()
+    assert c.lookup(code, '0912345601')['status'] == 'expired'
+    assert c.customer_history()[0]['status'] == 'expired'
+    assert c.own_customer_profile()['history'][0]['status'] == 'expired'
+    with pytest.raises(ValueError, match='hết hạn'):
+        c.apply_promotion(booking_id, 'WELCOME10')
+    with factory() as db:
+        assert db.get(Promotion, promotion_id).used_count == int(already_applied)
+        assert (db.get(BookingPromotion, booking_id) is not None) == already_applied
+
+
+def test_service_details_include_legacy_and_orders_once_and_preview_does_not_issue_invoice(n3):
+    c, factory = n3
+    booking_id = reserve(c)
+    c.save_promotion(promotion())
+    c.apply_promotion(booking_id, 'WELCOME10')
+    c.add_usage(booking_id, 1, 1)
+    completed = c.request_service(booking_id, 1, 2)
+    c.set_service_order_status(completed, 'confirmed')
+    c.set_service_order_status(completed, 'completed')
+    pending = c.request_service(booking_id, 1, 3)
+    confirmed = c.request_service(booking_id, 1, 4)
+    c.set_service_order_status(confirmed, 'confirmed')
+    cancelled = c.request_service(booking_id, 1, 5)
+    c.set_service_order_status(cancelled, 'cancelled')
+    before = len(c.table('logs'))
+    details = c.booking_service_details(booking_id)
+    assert len(details['rows']) == 5
+    assert details['service_total'].startswith('150,000')
+    assert details['open_total'].startswith('350,000')
+    assert details['discount'].startswith('120,000')
+    assert details['total'].startswith('1,230,000')
+    assert details['invoice_id'] is None
+    assert len(c.table('logs')) == before
+    with factory() as db:
+        assert db.scalar(select(func.count(Invoice.id))) == 0
+        assert db.scalar(select(func.count(ServiceUsage.id))) == 2
+    c.set_service_order_status(pending, 'cancelled')
+    c.set_service_order_status(confirmed, 'cancelled')
+    invoice_id = c.make_invoice(booking_id)
+    c.pay(invoice_id, '100000', 'cash')
+    with factory() as db:
+        db.get(Booking, booking_id).nightly_price = Decimal('999')
+        db.commit()
+    billed = c.booking_service_details(booking_id)
+    assert billed['invoice_id'] == invoice_id
+    assert billed['room_total'].startswith('1,200,000')
+    assert billed['total'] == details['total']
+    assert billed['paid'].startswith('100,000')
+    assert billed['due'].startswith('1,130,000')
+
+
+def test_service_details_keep_price_and_name_snapshot_and_scope_customer_access(n3):
+    c, factory = n3
+    booking_id = reserve(c, customer_id=1)
+    order_id = c.request_service(booking_id, 1, 2)
+    c.set_service_order_status(order_id, 'confirmed')
+    c.set_service_order_status(order_id, 'completed')
+    c.save_service({'name': 'Renamed service', 'price': '90000'}, 1)
+    c.login('guest1', 'CustomerPass123')
+    details = c.booking_service_details(booking_id)
+    assert details['rows'][0]['service'] == 'Giặt là'
+    assert details['rows'][0]['unit_price'].startswith('50,000')
+    c.login('guest2', 'CustomerPass123')
+    with pytest.raises(PermissionError):
+        c.booking_service_details(booking_id)
+    c.logout()
+    with pytest.raises(PermissionError):
+        c.booking_service_details(booking_id)
+    c.login('reception', 'StrongStaff123')
+    assert c.booking_service_details(booking_id)['booking_id'] == booking_id
+
+
+def test_service_order_filters_combine_query_status_local_date_and_account_scope(n3):
+    c, factory = n3
+    first = reserve(c, customer_id=1)
+    c.save_room({'number': '202', 'type_id': 1, 'floor': 2})
+    second = reserve(c, room_id=2, customer_id=2)
+    first_order = c.request_service(first, 1, 1)
+    second_order = c.request_service(second, 1, 2)
+    c.set_service_order_status(second_order, 'confirmed')
+    third_order = c.request_service(first, 1, 3)
+    c.set_service_order_status(third_order, 'cancelled')
+    # UTC timestamps cross midnight in Vietnam; date filters use hotel-local dates.
+    with factory() as db:
+        db.get(ServiceOrder, first_order).created_at = datetime(2026, 11, 24, 17, 30)
+        db.get(ServiceOrder, second_order).created_at = datetime(2026, 11, 24, 16, 59)
+        db.get(ServiceOrder, third_order).created_at = datetime(2026, 11, 25, 17)
+        db.commit()
+    filtered = c.service_orders(query='201', status='pending', date_from='2026-11-25', date_to='2026-11-25')
+    assert [row['id'] for row in filtered] == [first_order]
+    assert filtered[0]['room'] == '201' and filtered[0]['created_at'] == '2026-11-25 00:30'
+    assert [row['id'] for row in c.service_orders(date_from='2026-11-25', date_to='2026-11-25')] == [first_order]
+    assert [row['id'] for row in c.service_orders(status='confirmed')] == [second_order]
+    assert {row['id'] for row in c.service_orders(query='Guest 1')} == {first_order, third_order}
+    assert {row['id'] for row in c.service_orders(query='0912345601')} == {first_order, third_order}
+    code = c.customer_details(1)['history'][0]['code']
+    assert {row['id'] for row in c.service_orders(query=code)} == {first_order, third_order}
+    assert c.service_orders(query='%') == []
+    c.login('guest1', 'CustomerPass123')
+    assert c.service_orders(query='202') == []
+    assert c.service_orders(second) == []
+    assert {row['id'] for row in c.service_orders(first)} == {first_order, third_order}
+
+
+@pytest.mark.parametrize('filters', [
+    {'status': 'paid'}, {'date_from': 'invalid'}, {'date_to': '2026-02-30'},
+    {'date_from': '2026-12-02', 'date_to': '2026-12-01'}, {'date_from': '0001-01-01'},
+])
+def test_service_order_filters_reject_invalid_inputs(n3, filters):
+    c, _ = n3
+    with pytest.raises(ValueError):
+        c.service_orders(**filters)
+
+
+def test_service_ledger_totals_include_all_usages_beyond_list_limit(n3):
+    c, factory = n3
+    booking_id = reserve(c)
+    with factory() as db:
+        db.add_all(ServiceUsage(booking_id=booking_id, service_id=1, quantity=1, unit_price=50000)
+                   for _ in range(501))
+        db.commit()
+    details = c.booking_service_details(booking_id)
+    assert len(details['rows']) == 501
+    assert details['service_total'].startswith('25,050,000')
+    assert details['invoice_id'] is None
