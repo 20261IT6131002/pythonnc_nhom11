@@ -5,7 +5,7 @@ import re
 from sqlalchemy import select
 
 from hotel.models.entities import BookingPromotion, Invoice, Promotion, User
-from hotel.services.business import log_event, money
+from hotel.services.business import booking_hold_expired, log_event, money
 from hotel.services.catalog import checked_name, positive_int
 from hotel.services.service_orders import authorize_booking, locked_booking
 
@@ -64,6 +64,8 @@ def redeem(db, booking_id, code, actor_id=None, *, commit=True):
     booking = locked_booking(db, booking_id)
     if actor_id is not None:
         authorize_booking(db, booking, actor_id)
+    if booking_hold_expired(booking):
+        raise ValueError('Đơn giữ phòng đã hết hạn, không thể áp dụng khuyến mãi.')
     code = normalize_code(code)
     previous = db.scalar(select(BookingPromotion).where(
         BookingPromotion.booking_id == booking.id).with_for_update())

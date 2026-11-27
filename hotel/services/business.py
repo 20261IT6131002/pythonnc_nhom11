@@ -1,12 +1,14 @@
 from __future__ import annotations
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
-from sqlalchemy import select, func
+from sqlalchemy import and_, or_, select, func
 from sqlalchemy.orm import Session, joinedload
-from hotel.models.entities import (Booking, Room, RoomType, Customer, HotelService, ServiceUsage, Invoice, Payment, AuditLog, utc_now)
+from hotel.models.entities import (Booking, Room, RoomType, Customer, HotelService, ServiceUsage,
+                                   Invoice, Payment, AuditLog, SystemSetting, utc_now)
 
 ACTIVE_STATUSES = ('pending', 'confirmed', 'checked_in')
+BOOKING_HOLD_MINUTES = 15
 
 def money(value):
     try:
@@ -23,8 +25,53 @@ def dates_in_order(checkin, checkout):
     if checkin < date.today():
         raise ValueError('Ngày nhận phòng không được trong quá khứ.')
 
+def booking_hold_expired(booking, now=None):
+    if booking.status != 'pending':
+        return False
+    now = now or utc_now()
+    return booking.created_at <= now - timedelta(minutes=BOOKING_HOLD_MINUTES)
+
+def effective_booking_status(booking, now=None):
+    return 'expired' if booking_hold_expired(booking, now) else booking.status
+
+def active_booking_clause(now=None):
+    now = now or utc_now()
+    hold_cutoff = now - timedelta(minutes=BOOKING_HOLD_MINUTES)
+    return or_(
+        Booking.status.in_(('confirmed', 'checked_in')),
+        and_(Booking.status == 'pending', Booking.created_at > hold_cutoff),
+    )
+
 def conflicting_query(room_id, checkin, checkout):
-    return select(Booking.id).where(Booking.room_id == room_id, Booking.status.in_(ACTIVE_STATUSES), Booking.checkin_date < checkout, Booking.checkout_date > checkin)
+    return select(Booking.id).where(Booking.room_id == room_id, active_booking_clause(),
+                                    Booking.checkin_date < checkout, Booking.checkout_date > checkin)
+
+def local_now():
+    return datetime.now().astimezone().replace(tzinfo=None)
+
+def _configured_time(db, key, default):
+    setting = db.get(SystemSetting, key)
+    value = setting.value if setting else default
+    try:
+        return time.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f'Cấu hình {key} không hợp lệ; cần dùng dạng HH:MM.') from exc
+
+def validate_stay_schedule(db, booking, new_status, now=None):
+    now = now or local_now()
+    if new_status == 'checked_in':
+        if now.date() < booking.checkin_date:
+            raise ValueError('Chỉ được nhận phòng từ ngày đặt trở đi.')
+        checkin_time = _configured_time(db, 'checkin_time', '14:00')
+        if now.date() == booking.checkin_date and now.time() < checkin_time:
+            raise ValueError(f'Chỉ được nhận phòng từ {checkin_time.strftime("%H:%M")}.')
+    elif new_status == 'checked_out':
+        if now.date() < booking.checkout_date:
+            raise ValueError('Chỉ được trả phòng từ ngày trả đã đặt trở đi.')
+        checkout_time = _configured_time(db, 'checkout_time', '12:00')
+        return (now.date() > booking.checkout_date or
+                (now.date() == booking.checkout_date and now.time() > checkout_time))
+    return False
 
 def find_rooms(db: Session, checkin=None, checkout=None, room_type_id=None, guests=1):
     q = select(Room).join(RoomType).options(joinedload(Room.room_type)).where(Room.active.is_(True), RoomType.capacity >= guests).order_by(Room.number)
@@ -82,7 +129,15 @@ def create_booking(db: Session, *, name, phone, email, room_id, checkin, checkou
 
 def change_booking_status(db, booking, new_status, actor_id):
     transitions={'pending':{'confirmed','cancelled'}, 'confirmed':{'checked_in','cancelled'}, 'checked_in':{'checked_out'}, 'checked_out':set(), 'cancelled':set()}
-    if new_status not in transitions.get(booking.status, set()):
+    current_status = effective_booking_status(booking)
+    if current_status == 'expired':
+        if new_status != 'cancelled':
+            raise ValueError('Yêu cầu giữ phòng đã hết hạn; không thể xác nhận hoặc nhận phòng.')
+        booking.status = 'cancelled'
+        log_event(db, actor_id, 'booking.status', f'{booking.code}: cancelled')
+        db.commit()
+        return
+    if new_status not in transitions.get(current_status, set()):
         raise ValueError('Không được chuyển trạng thái theo yêu cầu.')
     if new_status == 'checked_out':
         if booking.invoice is None:
@@ -93,7 +148,14 @@ def change_booking_status(db, booking, new_status, actor_id):
     elif new_status == 'checked_in':
         booking.checked_in_at = utc_now()
     booking.status = new_status
-    log_event(db, actor_id, 'booking.status', f'{booking.code}: {new_status}')
+    details = f'{booking.code}: {new_status}'
+    if new_status == 'checked_out':
+        checkout_time = _configured_time(db, 'checkout_time', '12:00')
+        now = local_now()
+        if (now.date() > booking.checkout_date or
+                (now.date() == booking.checkout_date and now.time() > checkout_time)):
+            details += f' (trả trễ sau {checkout_time.strftime("%H:%M")})'
+    log_event(db, actor_id, 'booking.status', details)
     db.commit()
 
 def add_service_usage(db, booking, service, quantity, actor_id):

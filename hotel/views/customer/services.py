@@ -6,6 +6,7 @@ from hotel.views.components.theme import (BACKGROUND, DEEP, EDGE, FONT, GOLD, GO
 from hotel.views.components.widget_helpers import (add_tree, choice_id, error, form_dialog, success)
 from hotel.views.components.service_forms import request_service_dialog
 from hotel.views.pages import TABLE_COLUMNS
+from hotel.views.components.service_details import show_booking_services
 
 
 class CustomerServicesMixin:
@@ -58,7 +59,17 @@ class CustomerServicesMixin:
             except Exception as exc:
                 error(self, exc)
 
+        def details():
+            try:
+                if not tree.selection():
+                    raise ValueError('Chọn một yêu cầu dịch vụ để xem chi tiết đơn.')
+                row = next(row for row in rows if str(row['id']) == tree.selection()[0])
+                show_booking_services(self, self.c, row['booking_id'])
+            except Exception as exc:
+                error(self, exc)
+
         solid_button(section, 'Hủy yêu cầu đang chờ', cancel, light=True).pack(anchor='w', pady=(12, 0))
+        solid_button(section, 'Dịch vụ & chi phí theo đơn', details, light=True).pack(anchor='w', pady=(6, 0))
 
     def _public_promotions(self):
         section = self._section()

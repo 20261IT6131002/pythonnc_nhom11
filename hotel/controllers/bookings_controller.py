@@ -80,10 +80,13 @@ class BookingsControllerMixin:
                 'payment_status': ('Đã thanh toán đủ' if inv_due == 0 else f'Còn thiếu {vnd(inv_due)}') if has_inv else ('Đã đặt cọc' if dep_total > 0 else 'Chưa thanh toán')
             }
 
-    def set_booking_status(self, booking_id, status):
+    def set_booking_status(self, booking_id, status, *, enforce_schedule=False):
         with self._session() as db:
             actor = self._require_staff(db)
-            business.change_booking_status(db, self._must(db, Booking, booking_id), status, actor)
+            booking = self._must(db, Booking, booking_id)
+            if enforce_schedule:
+                business.validate_stay_schedule(db, booking, status)
+            business.change_booking_status(db, booking, status, actor)
 
     def calendar(self, first_day, days=7):
         start = date.fromisoformat(first_day)
@@ -93,7 +96,7 @@ class BookingsControllerMixin:
             self._require_staff(db)
             rooms = HotelRepository(db).rooms()
             bookings = db.scalars(select(Booking).where(
-                Booking.status.in_(('pending', 'confirmed', 'checked_in')),
+                business.active_booking_clause(),
                 Booking.checkin_date < end, Booking.checkout_date > start)).all()
             headers = [(start + timedelta(days=i)).strftime('%d/%m') for i in range(days)]
             result = []

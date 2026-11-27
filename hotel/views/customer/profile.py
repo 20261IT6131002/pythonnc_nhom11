@@ -1,6 +1,7 @@
 """Personal profile and promotion actions for the authenticated customer."""
 from hotel.views.components.theme import NAVY, WHITE, solid_button, text
 from hotel.views.components.widget_helpers import choice_id, error, form_dialog, success
+from hotel.views.components.service_details import show_booking_services
 
 
 class CustomerProfileMixin:
@@ -15,6 +16,22 @@ class CustomerProfileMixin:
             anchor='w', pady=(0, 12))
         solid_button(section, 'Đăng ký / xem yêu cầu dịch vụ', self.show_services, light=True).pack(
             anchor='w', pady=(0, 12))
+        solid_button(section, 'Xem dịch vụ & chi phí theo đơn', self.customer_booking_costs, light=True).pack(
+            anchor='w', pady=(0, 12))
+
+    def customer_booking_costs(self):
+        try:
+            bookings = self.c.customer_history()
+            if not bookings:
+                raise ValueError('Chưa có đặt phòng liên kết với tài khoản.')
+            choices = [f"{row['id']} - {row['code']} / Phòng {row['room']}" for row in bookings]
+            values = form_dialog(self, 'Chọn đơn xem dịch vụ và chi phí', [
+                ('booking', 'Đơn đặt phòng', choices[0], choices),
+            ])
+            if values is not None:
+                show_booking_services(self, self.c, choice_id(values['booking']))
+        except Exception as exc:
+            error(self, exc)
 
     def edit_customer_profile(self):
         try:

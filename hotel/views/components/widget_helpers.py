@@ -79,7 +79,7 @@ def add_tree(parent, columns, rows, height=17, row_key='id'):
         iid = str(row.get(row_key, index))
         status = row.get('status')
         tag = status if status in {'pending', 'confirmed', 'checked_in', 'checked_out',
-                                   'cancelled'} else ('alt' if index % 2 else 'normal')
+                                   'cancelled', 'expired'} else ('alt' if index % 2 else 'normal')
         tree.insert('', 'end', iid=iid, values=[pretty(row.get(c[0], '')) for c in columns],
                     tags=(tag,))
     tree.tag_configure('alt', background='#edf4fb')
@@ -88,13 +88,15 @@ def add_tree(parent, columns, rows, height=17, row_key='id'):
     tree.tag_configure('checked_in', background='#eaf1fc')
     tree.tag_configure('checked_out', background='#ecf8f0')
     tree.tag_configure('cancelled', background='#f9ebed')
+    tree.tag_configure('expired', background='#f3eeee')
     return tree
 
 
 def pretty(value):
     labels = {'pending': 'Chờ xác nhận', 'confirmed': 'Đã xác nhận',
               'checked_in': 'Đang ở', 'checked_out': 'Đã trả phòng',
-              'cancelled': 'Đã hủy', 'completed': 'Đã hoàn thành',
+              'cancelled': 'Đã hủy', 'expired': 'Hết hạn',
+              'completed': 'Đã hoàn thành',
               'percent': 'Phần trăm', 'fixed': 'Số tiền'}
     if isinstance(value, str) and value in labels:
         return labels[value]

@@ -101,6 +101,8 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
                 self._chat()
             elif tab == 'customers':
                 self._customers_tab()
+            elif tab == 'service_orders':
+                self._service_orders_tab()
             else:
                 self._table_tab(tab)
         except Exception as exc:
@@ -130,7 +132,8 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
     def _table_tab(self, tab):
         loaders = {'customers': lambda: self.c.search_customers(getattr(self, 'customer_query', '')),
                    'staying': self.c.staying_customers, 'services': self.c.service_catalog,
-                   'service_orders': self.c.service_orders, 'promotions': self.c.promotions}
+                   'service_orders': lambda: self.c.service_orders(**getattr(self, 'service_order_filters', {})),
+                   'promotions': self.c.promotions}
         self.rows = loaders[tab]() if tab in loaders else self.c.table(tab)
         panel = tk.Frame(self.body, bg=WHITE, highlightbackground=EDGE,
                          highlightthickness=1, padx=16, pady=16)
@@ -164,11 +167,15 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
         elif tab == 'staying':
             self._button(bar, 'Danh sách người lưu trú', self._booking_guests, True)
             self._button(bar, 'Yêu cầu dịch vụ', lambda: self._request_service(True))
+            self._button(bar, 'Dịch vụ & chi phí', self._booking_service_details)
         elif tab == 'service_orders':
             self._button(bar, 'Tạo yêu cầu', self._request_service, True)
             self._button(bar, 'Xác nhận', lambda: self._service_order_status('confirmed'))
             self._button(bar, 'Hoàn thành', lambda: self._service_order_status('completed'))
             self._button(bar, 'Hủy yêu cầu', lambda: self._service_order_status('cancelled'))
+            details_bar = ttk.Frame(panel)
+            details_bar.pack(fill='x', pady=(0, 8))
+            self._button(details_bar, 'Chi tiết theo đơn', lambda: self._booking_service_details(True))
         elif tab == 'promotions' and self.admin:
             self._button(bar, 'Thêm khuyến mãi', self._edit_promotion, True)
             self._button(bar, 'Sửa / bật tắt', lambda: self._edit_promotion(True))
@@ -191,6 +198,9 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
             self._button(bar, 'Xuất phiếu hoàn PDF', self._refund_pdf)
             self._button(bar, 'Gửi email hoàn tiền', self._refund_email)
         self.tree = add_tree(panel, TABLE_COLUMNS[tab], self.rows)
+        if tab == 'service_orders':
+            ttk.Label(panel, text=f'Đang hiển thị {len(self.rows)} yêu cầu, tối đa 500 dòng theo bộ lọc.').pack(
+                anchor='w', pady=(6, 0))
 
 
 

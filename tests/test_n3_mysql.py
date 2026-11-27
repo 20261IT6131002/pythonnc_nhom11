@@ -109,6 +109,14 @@ def test_mysql_capacity_completion_promotion_limit_and_invoice_serialization(mys
     with factory() as db:
         assert db.scalar(select(func.count(ServiceUsage.id))) == 1
 
+    completed = c.service_orders(status='completed')[0]
+    local_day = completed['created_at'][:10]
+    filtered = c.service_orders(query='test spa', status='completed',
+                                date_from=local_day, date_to=local_day)
+    assert [row['id'] for row in filtered] == [order_id]
+    details = c.booking_service_details(completed['booking_id'])
+    assert details['service_total'].startswith('50,000') and details['invoice_id'] is None
+
     c.save_promotion({'code': 'TEST10', 'name': 'Test promotion', 'discount_type': 'percent',
         'value': 10, 'starts_on': str(date.today()), 'ends_on': str(day), 'usage_limit': 1})
 
@@ -125,3 +133,4 @@ def test_mysql_capacity_completion_promotion_limit_and_invoice_serialization(mys
     invoices = run_together(factory, lambda worker, _: worker.make_invoice(1))
     assert invoices[0] == invoices[1]
     assert c.make_invoice(2)
+    assert c.booking_service_details(1)['invoice_id'] == invoices[0]

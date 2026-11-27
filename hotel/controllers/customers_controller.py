@@ -87,7 +87,8 @@ class CustomersControllerMixin:
                 'paid_total': vnd(repo.paid_total(customer_ids)),
                 'history': [{'id': row.id, 'code': row.code, 'room': row.room.number,
                              'checkin': str(row.checkin_date), 'checkout': str(row.checkout_date),
-                             'status': row.status, 'checked_in_at': str(row.checked_in_at or ''),
+                             'status': business.effective_booking_status(row),
+                             'checked_in_at': str(row.checked_in_at or ''),
                              'checked_out_at': str(row.checked_out_at or '')} for row in bookings]}
 
     def own_customer_profile(self):

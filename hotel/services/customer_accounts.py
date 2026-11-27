@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from hotel.models.entities import Booking, Customer, CustomerLinkRequest, User
 from hotel.models.common import utc_now
-from hotel.services.business import log_event
+from hotel.services.business import effective_booking_status, log_event
 from hotel.services.phone import normalize_phone, phones_match
 
 
@@ -17,7 +17,7 @@ def history(db, user):
         Customer.user_id == user.id).order_by(Booking.id.desc()).limit(100)).all()
     return [{'id': b.id, 'code': b.code, 'room': b.room.number,
              'checkin': str(b.checkin_date), 'checkout': str(b.checkout_date),
-             'status': b.status, 'customer': b.customer.full_name} for b in records]
+             'status': effective_booking_status(b), 'customer': b.customer.full_name} for b in records]
 
 
 def request_link(db, user, booking_code, phone):

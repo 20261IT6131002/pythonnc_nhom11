@@ -59,16 +59,27 @@ class ServicesControllerMixin:
             return service_orders.request_service(db, booking_id, service_id, quantity, user.id,
                 scheduled_at=scheduled_at, notes=notes, request_token=request_token)
 
-    def service_orders(self, booking_id=None):
+    def service_orders(self, booking_id=None, *, query='', status='', date_from='', date_to=''):
         with self._session() as db:
             user = self._require_user(db)
             if user.role != 'customer':
                 self._require_staff(db)
+            filters = service_orders.order_filters(query, status, date_from, date_to)
             return [{'id': row.id, 'booking_id': row.booking_id, 'code': code, 'customer': name,
+                     'room': room, 'created_at': service_orders.local_timestamp(row.created_at),
                      'service': row.service_name, 'quantity': row.quantity, 'price': str(row.unit_price),
                      'amount': vnd(row.unit_price * row.quantity), 'status': row.status,
                      'scheduled_at': str(row.scheduled_at or ''), 'notes': row.notes}
-                    for row, code, name in ServiceRepository(db).orders(user, booking_id)]
+                    for row, code, name, room in ServiceRepository(db).orders(user, booking_id, **filters)]
+
+    def booking_service_details(self, booking_id):
+        with self._session() as db:
+            user = self._require_user(db)
+            details = service_orders.booking_details(db, self._must(db, Booking, booking_id), user.id)
+            money_fields = ('room_total', 'service_total', 'open_total', 'discount', 'total', 'paid', 'due')
+            return dict(details, **{field: vnd(details[field]) for field in money_fields},
+                        rows=[dict(row, unit_price=vnd(row['unit_price']), amount=vnd(row['amount']))
+                              for row in details['rows']])
 
     def set_service_order_status(self, order_id, status):
         with self._session(read_committed=True) as db:

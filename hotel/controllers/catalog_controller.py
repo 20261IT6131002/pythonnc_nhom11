@@ -141,5 +141,6 @@ class CatalogControllerMixin:
                     'customers': repo.count(Customer), 'bookings': repo.count(Booking),
                     'staying': repo.count_bookings_with_status('checked_in'),
                     'revenue': vnd(today_total), 'recent': [
-                        (b.code, b.customer.full_name, b.room.number, b.status)
+                        (b.code, b.customer.full_name, b.room.number,
+                         business.effective_booking_status(b))
                         for b in repo.bookings()[:10]]}

@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from tkinter import ttk, filedialog
 from hotel.views.components.theme import (BACKGROUND, DEEP, EDGE, FONT, GOLD, GOLD_LIGHT, INK, MUTED, NAVY, SIDEBAR, SIDEBAR_HOVER, WHITE, brand, hotel_art, solid_button, text)
 from hotel.views.components.widget_helpers import (add_tree, choice_id, error, form_dialog, success)
+from hotel.views.components.service_details import show_booking_services
 
 
 class CustomersScreenMixin:
@@ -37,10 +38,18 @@ class CustomersScreenMixin:
         panel.pack(fill='both', expand=True)
         ttk.Label(panel, text=f"{detail['booking_count']} đơn · {detail['stay_count']} lượt lưu trú · "
                   f"Đã thanh toán {detail['paid_total']}", style='FormTitle.TLabel').pack(anchor='w')
-        add_tree(panel, [('code', 'Mã đặt', 160), ('room', 'Phòng', 65),
+        tree = add_tree(panel, [('code', 'Mã đặt', 160), ('room', 'Phòng', 65),
                         ('checkin', 'Ngày nhận', 110), ('checkout', 'Ngày trả', 110),
                         ('status', 'Trạng thái', 120), ('checked_in_at', 'Nhận thực tế (UTC)', 180),
                         ('checked_out_at', 'Trả thực tế (UTC)', 180)], detail['history'])
+
+        def services():
+            if not tree.selection():
+                raise ValueError('Chọn một đơn đặt phòng trong lịch sử.')
+            show_booking_services(dialog, self.c, int(tree.selection()[0]))
+
+        ttk.Button(panel, text='Dịch vụ & chi phí của đơn', command=lambda: self._safe(services)).pack(
+            anchor='w', pady=(12, 0))
         ttk.Button(panel, text='Đóng', command=dialog.destroy).pack(anchor='e', pady=(12, 0))
 
     def _customers_tab(self):

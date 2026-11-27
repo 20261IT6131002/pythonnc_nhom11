@@ -1,18 +1,85 @@
 """Service requests reserve capacity and post one usage only on completion."""
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import select
 
 from hotel.models.common import utc_now
-from hotel.models.entities import (Booking, Customer, HotelService, Invoice, ServiceDetails,
+from hotel.models.entities import (Booking, BookingPromotion, Customer, HotelService, Invoice, ServiceDetails,
                                    ServiceOrder, ServiceUsage, SystemSetting, User)
-from hotel.services.business import log_event
+from hotel.repositories.services import ServiceRepository
+from hotel.services.business import effective_booking_status, log_event
 from hotel.services.catalog import checked_name, positive_int
 
 
 HOTEL_TIMEZONE = timezone(timedelta(hours=7))
 OPEN_STATUSES = ('pending', 'confirmed')
+
+
+def local_timestamp(value):
+    if value is None:
+        return ''
+    return value.replace(tzinfo=timezone.utc).astimezone(HOTEL_TIMEZONE).strftime('%Y-%m-%d %H:%M')
+
+
+def order_filters(query='', status='', date_from='', date_to=''):
+    query = checked_name(query, 0, 160)
+    if status not in ('', 'pending', 'confirmed', 'completed', 'cancelled'):
+        raise ValueError('Trạng thái yêu cầu dịch vụ không hợp lệ.')
+    bounds = []
+    for value, day_time in ((date_from, time.min), (date_to, time.max)):
+        if not str(value).strip():
+            bounds.append(None)
+            continue
+        try:
+            day = date.fromisoformat(str(value).strip())
+        except ValueError as exc:
+            raise ValueError('Ngày lọc cần có dạng YYYY-MM-DD.') from exc
+        if day.year < 1000:
+            raise ValueError('Năm lọc cần từ 1000 trở đi.')
+        bounds.append(datetime.combine(day, day_time, tzinfo=HOTEL_TIMEZONE)
+                      .astimezone(timezone.utc).replace(tzinfo=None))
+    if bounds[0] and bounds[1] and bounds[0] > bounds[1]:
+        raise ValueError('Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.')
+    return dict(query=query, status=status, created_from=bounds[0], created_until=bounds[1])
+
+
+def booking_details(db, booking, actor_id):
+    """Read the full service ledger, including legacy usages, without issuing an invoice."""
+    authorize_booking(db, booking, actor_id)
+    repo = ServiceRepository(db)
+    orders = repo.booking_orders(booking.id)
+    usages = repo.booking_usages(booking.id)
+    linked_usage_ids = {order.usage_id for order in orders if order.usage_id is not None}
+    rows = [{'id': f'order-{order.id}', 'source': f'Yêu cầu #{order.id}',
+             'service': order.service_name, 'quantity': order.quantity,
+             'unit_price': order.unit_price, 'amount': order.unit_price * order.quantity,
+             'status': order.status, 'created_at': local_timestamp(order.created_at),
+             'scheduled_at': str(order.scheduled_at or ''), 'notes': order.notes} for order in orders]
+    rows.extend({'id': f'usage-{usage.id}', 'source': 'Phát sinh trực tiếp',
+                 'service': usage.service.name, 'quantity': usage.quantity,
+                 'unit_price': usage.unit_price, 'amount': usage.unit_price * usage.quantity,
+                 'status': 'completed', 'created_at': local_timestamp(usage.created_at),
+                 'scheduled_at': '', 'notes': ''} for usage in usages if usage.id not in linked_usage_ids)
+    service_total = sum((usage.unit_price * usage.quantity for usage in usages), Decimal('0'))
+    open_total = sum((order.unit_price * order.quantity for order in orders
+                      if order.status in OPEN_STATUSES), Decimal('0'))
+    room_total = booking.nightly_price * (booking.checkout_date - booking.checkin_date).days
+    promotion = db.get(BookingPromotion, booking.id)
+    discount = min(room_total, promotion.discount_amount) if promotion else Decimal('0')
+    invoice = booking.invoice
+    if invoice is not None:
+        room_total, service_total, discount = invoice.room_amount, invoice.services_amount, invoice.discount_amount
+        total = invoice.total_amount
+        paid = sum((payment.amount for payment in invoice.payments), Decimal('0'))
+    else:
+        total, paid = room_total + service_total - discount, Decimal('0')
+    return {'booking_id': booking.id, 'code': booking.code, 'room': booking.room.number,
+            'customer': booking.customer.full_name, 'status': effective_booking_status(booking),
+            'rows': rows, 'room_total': room_total, 'service_total': service_total,
+            'open_total': open_total, 'discount': discount, 'total': total, 'paid': paid,
+            'due': max(Decimal('0'), total - paid), 'invoice_id': invoice.id if invoice else None}
 
 
 def authorize_booking(db, booking, actor_id):
