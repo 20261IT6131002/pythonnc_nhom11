@@ -180,6 +180,11 @@ def add_service_usage(db, booking, service, quantity, actor_id):
 
 def invoice_due(invoice):
     paid = sum((p.amount for p in invoice.payments), Decimal('0'))
+    if invoice.booking and getattr(invoice.booking, 'deposits', None):
+        paid += sum((d.amount for d in invoice.booking.deposits if d.status in ('paid', 'applied')), Decimal('0'))
+    if invoice.booking and getattr(invoice.booking, 'refunds', None):
+        refunded = sum((r.amount for r in invoice.booking.refunds if r.status == 'completed'), Decimal('0'))
+        paid = max(Decimal('0'), paid - refunded)
     return max(Decimal('0'), invoice.total_amount - paid)
 
 def ensure_invoice(db,booking,actor_id=None):

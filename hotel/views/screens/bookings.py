@@ -60,6 +60,34 @@ class BookingsScreenMixin:
             self.c.add_usage(row['id'], choice_id(values['service']), values['quantity'])
             self._done('Đã ghi nhận dịch vụ cho khách đang lưu trú.')
 
+    def _booking_deposit(self):
+        row = self._chosen()
+        values = form_dialog(self, f"Thu tiền đặt cọc đơn #{row['code']} (Phòng {row['room']})",
+            [('amount', 'Số tiền đặt cọc (VND)', ''),
+             ('method', 'Phương thức thu', 'cash', ['cash', 'bank_transfer', 'card_manual']),
+             ('reference', 'Mã tham chiếu / Số tài khoản', ''),
+             ('notes', 'Ghi chú', '')])
+        if values is not None:
+            dep_id = self.c.record_deposit(row['id'], values['amount'], values['method'],
+                                           values['reference'], values['notes'])
+            self._done(f"Đã ghi nhận tiền đặt cọc thành công cho đơn {row['code']}.")
+
+    def _booking_refund(self):
+        row = self._chosen()
+        suggest = self.c.suggest_refund(row['id'])
+        limit = suggest['refundable_limit']
+        if limit <= 0:
+            raise ValueError(f"Đơn {row['code']} chưa có khoản thanh toán hay tiền cọc nào để hoàn lại.")
+
+        values = form_dialog(self, f"Xử lý hoàn tiền cho đơn #{row['code']}",
+            [('policy', 'Quy định khách sạn', suggest['policy']),
+             ('amount', f"Số tiền hoàn (Tối đa {limit:,.0f} VND)", str(int(suggest['suggested_amount']))),
+             ('method', 'Hình thức hoàn', 'bank_transfer', ['bank_transfer', 'cash', 'card_manual']),
+             ('reason', 'Lý do hoàn tiền', 'Khách hủy phòng / Trả cọc')])
+        if values is not None:
+            ref_id = self.c.record_refund(row['id'], values['amount'], values['method'], values['reason'])
+            self._done(f"Đã hoàn {values['amount']} VND thành công cho đơn {row['code']} (Mã phiếu: REF-{ref_id}).")
+
     def _calendar(self):
         top = ttk.Frame(self.body)
         top.pack(fill='x')

@@ -162,9 +162,8 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
             self._button(extra, 'Người lưu trú', self._booking_guests)
             self._button(extra, 'Yêu cầu dịch vụ', lambda: self._request_service(True))
             self._button(extra, 'Áp dụng khuyến mãi', self._apply_promotion)
-            details_bar = ttk.Frame(panel)
-            details_bar.pack(fill='x', pady=(0, 8))
-            self._button(details_bar, 'Dịch vụ & chi phí', self._booking_service_details)
+            self._button(extra, 'Ghi nhận đặt cọc', self._booking_deposit)
+            self._button(extra, 'Hoàn tiền', self._booking_refund)
         elif tab == 'staying':
             self._button(bar, 'Danh sách người lưu trú', self._booking_guests, True)
             self._button(bar, 'Yêu cầu dịch vụ', lambda: self._request_service(True))
@@ -183,9 +182,21 @@ class StaffView(StaffDashboardMixin, AdminReportsMixin, AdminSettingsMixin, Room
         elif tab == 'services' and self.admin:
             self._button(bar, 'Thêm dịch vụ', lambda: self._edit_service(False), True)
             self._button(bar, 'Sửa / bật tắt', lambda: self._edit_service(True))
+        elif tab == 'deposits':
+            self._button(bar, 'Thu tiền cọc', self._record_deposit, True)
+            self._button(bar, 'Xuất phiếu cọc PDF', self._deposit_pdf)
+            self._button(bar, 'Gửi email phiếu cọc', self._deposit_email)
+            self._button(bar, 'Hoàn cọc', self._refund_deposit)
         elif tab == 'invoices':
             self._button(bar, 'Ghi nhận thanh toán', self._payment, True)
             self._button(bar, 'Xuất hóa đơn PDF', self._invoice_pdf)
+            self._button(bar, 'Gửi hóa đơn Email', self._invoice_email)
+            self._button(bar, 'Chi tiết hóa đơn', self._invoice_details)
+            self._button(bar, 'Hoàn tiền', self._refund_invoice)
+        elif tab == 'refunds':
+            self._button(bar, 'Ghi nhận hoàn tiền', self._record_refund, True)
+            self._button(bar, 'Xuất phiếu hoàn PDF', self._refund_pdf)
+            self._button(bar, 'Gửi email hoàn tiền', self._refund_email)
         self.tree = add_tree(panel, TABLE_COLUMNS[tab], self.rows)
         if tab == 'service_orders':
             ttk.Label(panel, text=f'Đang hiển thị {len(self.rows)} yêu cầu, tối đa 500 dòng theo bộ lọc.').pack(
